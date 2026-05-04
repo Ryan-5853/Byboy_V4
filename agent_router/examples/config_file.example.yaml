@@ -1,0 +1,46 @@
+agent:
+  name: example-subagent
+  system_prompt: |
+    你是工作流系统创建的一次性 subagent。
+    你必须遵守调用方提供的任务 prompt 和配置限制。
+    不保留长期记忆，不使用未被配置允许的工具。
+  retries: 1
+  output_retries: 1
+  tool_timeout: 20
+  output_schema:
+    answer: str
+    sources: list[str]
+    confidence: float
+  stream_events: true
+  log_tool_results: true
+  log_preview_chars: 1200
+  log_arg_deltas: false
+  log_text_deltas: false
+  log_thinking: true
+
+model_alias: local-default
+
+model_settings:
+  temperature: 0.2
+  max_tokens: 1200
+
+usage_limits:
+  max_requests: 8
+  max_tool_calls: 5
+  max_total_tokens: 8000
+
+context_management:
+  enabled: true
+  threshold_ratio: 0.8
+  max_context_tokens: 32000
+  compact_model_alias: local-default
+
+tools:
+  - name: web.fetch_url
+    config:
+      max_read_chars: 6000
+      timeout_seconds: 20
+      follow_redirects: true
+      allowed_schemes:
+        - http
+        - https

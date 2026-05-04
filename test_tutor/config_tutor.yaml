@@ -1,0 +1,41 @@
+agent:
+  name: tutor-analyzer
+  retries: 1
+  tool_timeout: 30
+  stream_events: false
+  log_tool_results: false
+  log_preview_chars: 600
+  log_thinking: false
+
+model_alias: local-default
+
+model_settings:
+  temperature: 0.1
+  max_tokens: 64000
+
+usage_limits:
+  max_requests: 30
+  max_tool_calls: 15
+  max_total_tokens: null
+
+context_management:
+  enabled: false
+
+tools:
+  - name: web.fetch_url
+    config:
+      max_read_chars: 15000
+      timeout_seconds: 30
+      follow_redirects: true
+      allowed_schemes:
+        - http
+        - https
+
+  - name: web.extract_links
+    config:
+      max_links: 30
+      timeout_seconds: 20
+      same_host_only: true
+      allowed_schemes:
+        - http
+        - https
