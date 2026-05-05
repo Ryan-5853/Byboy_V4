@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 from urllib.parse import urlparse
+import json
 
 from pydantic import BaseModel, Field
 
@@ -24,7 +25,6 @@ class PostUrlArgs(BaseModel):
 
 def execute(args: PostUrlArgs, config: PostUrlConfig) -> str:
     import httpx
-    import trafilatura
 
     scheme = urlparse(args.url).scheme.lower()
     if scheme not in config.allowed_schemes:
@@ -41,7 +41,29 @@ def execute(args: PostUrlArgs, config: PostUrlConfig) -> str:
         follow_redirects=config.follow_redirects,
     )
     response.raise_for_status()
-    text = trafilatura.extract(response.text) or response.text
+    # Some endpoints return HTTP 200 with semantic failure payload like:
+    # {"msg":"sql error"}.
+    # Treat this as tool failure so the model changes strategy instead of retrying forever.
+    # IMPORTANT: if body is not JSON (e.g. HTML fragment), do not fail here.
+    payload = None
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        msg = str(payload.get("msg", "")).strip().lower()
+        if msg in {"sql error", "error", "failed"}:
+            raise ValueError(
+                f"Server returned semantic failure payload: {json.dumps(payload, ensure_ascii=False)}"
+            )
+
+    try:
+        import trafilatura
+
+        text = trafilatura.extract(response.text) or response.text
+    except Exception:
+        # Degrade gracefully when trafilatura is unavailable.
+        text = response.text
     return text[: config.max_read_chars]
 
 
@@ -72,4 +94,3 @@ def get_tool_spec() -> ToolSpec:
         execute=execute,
         pydantic_tool_factory=build_pydantic_tool,
     )
-

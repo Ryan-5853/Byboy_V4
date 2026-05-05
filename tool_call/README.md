@@ -11,6 +11,7 @@
 - 校验运行时调用参数是否合法
 - 执行 tool，并返回统一结果
 - 为 `pydantic-ai` 暴露可挂载的 tool callable
+- 当模型调用 tool 时，如果参数被安全策略拦截或执行失败，返回 `TOOL_ERROR ...` 字符串给模型，让模型修正请求后重试；不直接抛异常打断整个 subagent
 
 ## Agent 配置格式
 
@@ -110,5 +111,24 @@ def get_tool_spec() -> ToolSpec:
 - 不要从 prompt 或模型输出中读取硬限制；只使用 `config`
 - 文件类 tool 必须在 `ConfigModel` 中声明工作空间根目录，并在 `execute` 中解析真实路径后检查是否仍在工作空间内
 - 网络类 tool 必须在 `ConfigModel` 中声明读取长度、超时、允许 scheme/domain 等限制
+- 浏览器类 tool 必须在 `ConfigModel` 中声明允许访问的 scheme/domain、渲染超时、返回体积上限；如果涉及截图或下载，也必须声明 workspace 写入边界
 - 写操作必须显式配置允许写入，默认只读
 - tool 抛出的错误应尽量清楚说明是权限、配置还是参数问题
+
+## 错误返回约定
+
+挂载给模型的 pydantic tool 必须遵守“失败返回，不崩 agent”的约定：
+
+```text
+TOOL_ERROR <tool_name>: 你的上一次toolcall失败了/被拦截了，因为 <ErrorType>: <message>。
+请你修改参数后重新提交toolcall，或者改用其他方式完成同一任务。
+```
+
+`ToolCallManager.as_pydantic_tools()` 会在所有 tool 外层统一兜底，并将：
+
+- 运行时抛出的异常
+- tool 内部返回的旧格式 `TOOL_ERROR ...`
+
+统一规范为上面的引导式错误文本，确保模型明确知道“上一次调用失败的原因”以及“下一步动作（改参数重提或换工具路径）”。
+
+注意：`ToolCallManager.call(...)` 和 CLI 直调仍会抛出异常，方便测试、CI 和人工调试发现问题。只有模型运行时挂载的 pydantic tool 会自动转成 `TOOL_ERROR`。

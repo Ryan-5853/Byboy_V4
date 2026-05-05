@@ -73,7 +73,9 @@ class AgentRouter:
             )
 
     def _build_agent(self, config: SubAgentConfig) -> Agent[Any, Any]:
-        model = self.llm_selector.get(config.model_alias)
+        resolved_model_alias = config.model_alias or self.llm_selector.config.default_alias
+        model = self.llm_selector.get(resolved_model_alias)
+        model_settings = self._build_model_settings(config)
         logger = RuntimeLogger(
             enabled=config.agent.stream_events,
             max_preview_chars=config.agent.log_preview_chars,
@@ -92,6 +94,7 @@ class AgentRouter:
             config.context_management,
             llm_selector=self.llm_selector,
             llm_config_file=str(self.llm_config_file) if self.llm_config_file else None,
+            active_model_alias=resolved_model_alias,
         )
         capabilities = []
         if config.context_management.enabled:
@@ -105,7 +108,7 @@ class AgentRouter:
             retries=config.agent.retries,
             output_retries=config.agent.output_retries,
             tools=tools,
-            model_settings=config.model_settings or None,
+            model_settings=model_settings,
             tool_timeout=config.agent.tool_timeout,
             capabilities=capabilities,
             event_stream_handler=logger.event_stream_handler if config.agent.stream_events else None,
@@ -113,6 +116,12 @@ class AgentRouter:
 
     def _build_usage_limits(self, config: SubAgentConfig) -> UsageLimits:
         return UsageLimits(**config.usage_limits.model_dump(exclude_none=True))
+
+    def _build_model_settings(self, config: SubAgentConfig) -> dict[str, Any] | None:
+        model_level_settings = self.llm_selector.get_model_settings(config.model_alias)
+        task_level_settings = config.model_settings or {}
+        merged = _deep_merge(model_level_settings, task_level_settings)
+        return merged or None
 
     def _resolve_output_mode(self, config: SubAgentConfig) -> tuple[Any, str]:
         """Return (output_type, extra_json_instruction).
@@ -201,3 +210,13 @@ def _looks_like_context_overflow(text: str) -> bool:
         "request too large",
     ]
     return any(marker in normalized for marker in markers)
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged

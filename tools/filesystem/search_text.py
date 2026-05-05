@@ -70,18 +70,21 @@ def build_pydantic_tool(config: SearchTextConfig):
         glob: str = "**/*",
         regex: bool = False,
         case_sensitive: bool = False,
-    ) -> list[dict[str, object]]:
+    ) -> list[dict[str, object]] | str:
         """Search text files under the configured workspace."""
-        args = SearchTextArgs.model_validate(
-            {
-                "query": query,
-                "path": path,
-                "glob": glob,
-                "regex": regex,
-                "case_sensitive": case_sensitive,
-            }
-        )
-        return execute(args, config)
+        try:
+            args = SearchTextArgs.model_validate(
+                {
+                    "query": query,
+                    "path": path,
+                    "glob": glob,
+                    "regex": regex,
+                    "case_sensitive": case_sensitive,
+                }
+            )
+            return execute(args, config)
+        except Exception as exc:
+            return f"TOOL_ERROR filesystem.search_text failed for {path}: {type(exc).__name__}: {exc}"
 
     return search_text
 

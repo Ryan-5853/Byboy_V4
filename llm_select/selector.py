@@ -25,6 +25,26 @@ class LLMSelector:
         model_config = self.get_config(alias)
         return self._build_model(model_config)
 
+    def get_model_settings(self, alias: str | None = None) -> dict[str, Any]:
+        """Return model-level settings configured for an alias.
+
+        These settings are owned by llm_select, not workflow prompts. They are
+        later passed to pydantic-ai as model_settings; OpenAI-compatible
+        backend-only parameters should live under `extra_body`.
+        """
+
+        config = self.get_config(alias)
+        settings = dict(config.model_settings)
+        return self._normalize_model_settings(config, settings)
+
+    def get_context_window_tokens(self, alias: str | None = None) -> int | None:
+        config = self.get_config(alias)
+        if config.context_window_tokens is not None:
+            return int(config.context_window_tokens)
+        if config.context_window is not None:
+            return int(config.context_window)
+        return None
+
     def get_config(self, alias: str | None = None) -> ModelConfig:
         selected_alias = alias or self.config.default_alias
         if selected_alias is None:
@@ -57,3 +77,25 @@ class LLMSelector:
         if config.provider == "known":
             return config.name
         raise ValueError(f"Unsupported model provider: {config.provider}")
+
+    def _normalize_model_settings(self, config: ModelConfig, settings: dict[str, Any]) -> dict[str, Any]:
+        # Qwen 官方接口约定：enable_thinking 需要放在
+        # extra_body.chat_template_kwargs.enable_thinking。
+        if "qwen" not in config.name.lower():
+            return settings
+
+        extra_body = settings.get("extra_body")
+        if not isinstance(extra_body, dict):
+            return settings
+
+        if "enable_thinking" not in extra_body:
+            return settings
+
+        enable_thinking = extra_body.pop("enable_thinking")
+        chat_template_kwargs = extra_body.get("chat_template_kwargs")
+        if not isinstance(chat_template_kwargs, dict):
+            chat_template_kwargs = {}
+        chat_template_kwargs["enable_thinking"] = enable_thinking
+        extra_body["chat_template_kwargs"] = chat_template_kwargs
+        settings["extra_body"] = extra_body
+        return settings

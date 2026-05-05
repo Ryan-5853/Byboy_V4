@@ -28,7 +28,8 @@
 context_management:
   enabled: true
   threshold_ratio: 0.8
-  max_context_tokens: 32000
+  # 可选：不填时自动使用 llm_select/models.yaml 里当前任务模型的 context_window_tokens
+  max_context_tokens: null
   compact_model_alias: local-default
   chars_per_token: 4.0
   keep_recent_messages: 0
@@ -39,8 +40,8 @@ context_management:
 字段说明：
 
 - `enabled`: 是否启用上下文管理。
-- `threshold_ratio`: 触发压缩的比例，例如 `0.8` 表示达到 `max_context_tokens` 的 80% 时触发。
-- `max_context_tokens`: 用于估算的上下文窗口大小。
+- `threshold_ratio`: 触发压缩的比例，例如 `0.8` 表示达到上下文窗口的 80% 时触发。
+- `max_context_tokens`: 可选手动覆盖。为空时从 `llm_select/models.yaml` 的当前模型别名读取 `context_window_tokens`（或兼容字段 `context_window`）。
 - `compact_model_alias`: 压缩上下文使用的模型别名。
 - `chars_per_token`: token 估算比例，默认 4 字符约等于 1 token。
 - `max_serialized_chars_for_compactor`: 送入压缩模型的最大序列化上下文字符数。

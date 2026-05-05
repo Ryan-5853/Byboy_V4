@@ -2,3 +2,5 @@ pydantic>=2.0.0
 pydantic-ai
 pyyaml
 beautifulsoup4
+trafilatura
+playwright>=1.52.0

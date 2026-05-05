@@ -37,9 +37,11 @@ class ContextManager:
         *,
         llm_selector: LLMSelector | None = None,
         llm_config_file: str | None = None,
+        active_model_alias: str | None = None,
     ) -> None:
         self.config = config or ContextManageConfig()
         self.llm_selector = llm_selector or LLMSelector(config_file=llm_config_file)
+        self.active_model_alias = active_model_alias
         self.last_report = ContextManageReport()
 
     async def compact_request_context(
@@ -92,15 +94,25 @@ class ContextManager:
         return messages
 
     def _build_report(self, messages: list[ai_messages.ModelMessage]) -> ContextManageReport:
+        max_context_tokens = self._resolve_max_context_tokens()
         estimated_tokens = self.estimate_tokens(self.serialize_messages(messages))
         return ContextManageReport(
             compacted=False,
             estimated_tokens=estimated_tokens,
-            threshold_tokens=int(self.config.max_context_tokens * self.config.threshold_ratio),
+            threshold_tokens=int(max_context_tokens * self.config.threshold_ratio),
             message_count_before=len(messages),
             message_count_after=len(messages),
             compact_model_alias=self.config.compact_model_alias,
         )
+
+    def _resolve_max_context_tokens(self) -> int:
+        if self.config.max_context_tokens is not None:
+            return int(self.config.max_context_tokens)
+        resolved = self.llm_selector.get_context_window_tokens(self.active_model_alias)
+        if resolved is not None:
+            return int(resolved)
+        # Fallback only when model metadata does not declare context window.
+        return 32000
 
     async def _compact_with_llm(self, messages: list[ai_messages.ModelMessage]) -> CompactState:
         model = self.llm_selector.get(self.config.compact_model_alias)

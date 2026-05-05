@@ -30,8 +30,11 @@ def execute(args: ReadFileArgs, config: ReadFileConfig) -> str:
 def build_pydantic_tool(config: ReadFileConfig):
     def read_file(path: str) -> str:
         """Read a text file from the configured workspace."""
-        args = ReadFileArgs.model_validate({"path": path})
-        return execute(args, config)
+        try:
+            args = ReadFileArgs.model_validate({"path": path})
+            return execute(args, config)
+        except Exception as exc:
+            return f"TOOL_ERROR filesystem.read_file failed for {path}: {type(exc).__name__}: {exc}"
 
     return read_file
 

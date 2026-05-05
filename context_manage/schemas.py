@@ -21,7 +21,7 @@ class CompactState(BaseModel):
 class ContextManageConfig(BaseModel):
     enabled: bool = True
     threshold_ratio: float = Field(default=0.8, gt=0, le=1)
-    max_context_tokens: int = Field(default=32000, ge=1000)
+    max_context_tokens: int | None = Field(default=None, ge=1000)
     compact_model_alias: str = "local-default"
     chars_per_token: float = Field(default=4.0, gt=0)
     max_serialized_chars_for_compactor: int = Field(default=120000, ge=1000)

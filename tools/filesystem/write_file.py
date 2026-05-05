@@ -43,10 +43,13 @@ def execute(args: WriteFileArgs, config: WriteFileConfig) -> dict[str, object]:
 
 
 def build_pydantic_tool(config: WriteFileConfig):
-    def write_file(path: str, content: str) -> dict[str, object]:
+    def write_file(path: str, content: str) -> dict[str, object] | str:
         """Write a text file inside the configured workspace."""
-        args = WriteFileArgs.model_validate({"path": path, "content": content})
-        return execute(args, config)
+        try:
+            args = WriteFileArgs.model_validate({"path": path, "content": content})
+            return execute(args, config)
+        except Exception as exc:
+            return f"TOOL_ERROR filesystem.write_file failed for {path}: {type(exc).__name__}: {exc}"
 
     return write_file
 

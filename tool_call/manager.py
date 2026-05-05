@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from functools import wraps
+import json
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -33,6 +34,8 @@ class ToolCallManager:
     ) -> None:
         self.registry = registry or build_default_tool_registry()
         self.logger = logger
+        self._repeat_same_call_count: dict[str, int] = {}
+        self._repeat_same_call_last_error: dict[str, str] = {}
         self._allowed: dict[str, tuple[ToolSpec, BaseModel]] = {}
         for configured_tool in configured_tools:
             if configured_tool.name in self._allowed:
@@ -84,12 +87,73 @@ class ToolCallManager:
     def _wrap_pydantic_callable(self, name: str, function: Any) -> Any:
         @wraps(function)
         def wrapped(*args: Any, **kwargs: Any) -> Any:
+            call_key = self._build_call_key(name, args, kwargs)
+            if self._repeat_same_call_count.get(call_key, 0) >= 3:
+                last_error = self._repeat_same_call_last_error.get(call_key, "同参数调用重复失败")
+                result = self._normalize_tool_error_message(
+                    name,
+                    f"TOOL_ERROR {name} failed: 检测到同一toolcall已连续失败多次（3+）: {last_error}",
+                )
+                self._log("tool_execute_error", name, error=result, repeated_call_guard=True)
+                return result
+
             self._log("tool_execute_start", name, args=args, kwargs=kwargs)
-            result = function(*args, **kwargs)
-            self._log("tool_execute_end", name, result=result)
-            return result
+            try:
+                result = function(*args, **kwargs)
+                if isinstance(result, str) and result.startswith("TOOL_ERROR"):
+                    result = self._normalize_tool_error_message(name, result)
+                    self._mark_call_error(call_key, result)
+                else:
+                    self._clear_call_error(call_key)
+                self._log("tool_execute_end", name, result=result)
+                return result
+            except Exception as exc:
+                result = self._normalize_tool_error_message(
+                    name,
+                    f"TOOL_ERROR {name} failed: {type(exc).__name__}: {exc}",
+                )
+                self._mark_call_error(call_key, result)
+                self._log("tool_execute_error", name, error=result)
+                return result
 
         return wrapped
+
+    def _build_call_key(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+        try:
+            normalized = json.dumps(
+                {"name": name, "args": args, "kwargs": kwargs},
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+        except Exception:
+            normalized = f"{name}|{args!r}|{kwargs!r}"
+        return normalized
+
+    def _mark_call_error(self, call_key: str, error: str) -> None:
+        self._repeat_same_call_count[call_key] = self._repeat_same_call_count.get(call_key, 0) + 1
+        self._repeat_same_call_last_error[call_key] = error
+
+    def _clear_call_error(self, call_key: str) -> None:
+        self._repeat_same_call_count.pop(call_key, None)
+        self._repeat_same_call_last_error.pop(call_key, None)
+
+    def _normalize_tool_error_message(self, name: str, message: str) -> str:
+        text = message.strip()
+        prefix = f"TOOL_ERROR {name}"
+        detail = text
+        if text.startswith(prefix):
+            detail = text[len(prefix):].strip()
+        elif text.startswith("TOOL_ERROR"):
+            detail = text[len("TOOL_ERROR"):].strip()
+        if detail.startswith("failed"):
+            detail = detail[len("failed"):].strip()
+        if detail.startswith(":"):
+            detail = detail[1:].strip()
+        return (
+            f"TOOL_ERROR {name}: 你的上一次toolcall失败了/被拦截了，因为 {detail}。"
+            "请你修改参数后重新提交toolcall，或者改用其他方式完成同一任务。"
+        )
 
     def _log(self, event: str, name: str, **fields: Any) -> None:
         if self.logger is not None:

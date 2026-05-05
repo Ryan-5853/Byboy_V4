@@ -46,6 +46,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+如果需要让 agent 访问需要 JavaScript 渲染的网页，再额外安装浏览器运行时：
+
+```bash
+python -m playwright install chromium
+```
+
+安装后即可在 agent 配置中挂载 `browser.render_page` 和 `browser.screenshot_page`。这两个工具会通过 `tool_call` 的硬限制配置控制允许访问的域名、渲染超时、返回长度和截图写入路径，适合在本工程内直接使用，也适合迁移到其他环境时按相同方式启用。
+
 ### 核心工作流执行步骤
 
 你可以按顺序运行工作流（**这是本系统的核心串行逻辑**）：
@@ -100,4 +108,3 @@ python -m tutor_select_v3 status
 # 全程指定使用的别名模型
 python -m tutor_select_v3 full --model local-default
 ```
-

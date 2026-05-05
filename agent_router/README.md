@@ -78,7 +78,7 @@ usage_limits:
 context_management:
   enabled: true
   threshold_ratio: 0.8
-  max_context_tokens: 32000
+  max_context_tokens: null
   compact_model_alias: local-default
   chars_per_token: 4.0
   max_serialized_chars_for_compactor: 120000
@@ -121,6 +121,8 @@ tools:
 - `temperature`: 单次模型请求的采样温度。
 - `max_tokens`: 单次模型响应最多生成多少 token。它限制的是“这一轮回答/工具参数/最终输出”的生成长度，不是整个 session 的总上下文。
 - `top_p`、`timeout`、`presence_penalty`、`frequency_penalty`、`stop_sequences` 等: 这些字段会原样传给 pydantic-ai 的模型设置，是否生效取决于后端 provider。
+- 模型别名也可以在 [llm_select/models.yaml](/llm_select/models.yaml) 中写固定 `model_settings`。`agent_router` 会先读取模型层设置，再用任务配置里的 `model_settings` 覆盖同名字段。
+- OpenAI-compatible 的非标准参数（例如 `top_k`、`min_p`、`repetition_penalty`）应放在模型层 `model_settings.extra_body` 中透传给后端。
 
 `usage_limits`
 
@@ -142,7 +144,7 @@ tools:
 
 - `enabled`: 是否启用上下文管理。
 - `threshold_ratio`: 触发压缩的比例。比如 `0.8` 表示达到上下文预算 80% 时压缩。
-- `max_context_tokens`: 估算的上下文窗口大小。
+- `max_context_tokens`: 可选手动覆盖。为空时由 `llm_select` 按当前 `model_alias` 读取 `context_window_tokens`（兼容 `context_window`）。
 - `compact_model_alias`: 固定压缩模型别名，由 `llm_select` 解析，可以和任务模型不同。
 - `chars_per_token`: token 粗略估算比例。默认 4 字符约等于 1 token。
 - `max_serialized_chars_for_compactor`: 送给压缩模型的最大序列化上下文字符数。

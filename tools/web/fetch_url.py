@@ -20,7 +20,6 @@ class FetchUrlArgs(BaseModel):
 
 def execute(args: FetchUrlArgs, config: FetchUrlConfig) -> str:
     import httpx
-    import trafilatura
 
     scheme = urlparse(args.url).scheme.lower()
     if scheme not in config.allowed_schemes:
@@ -33,7 +32,14 @@ def execute(args: FetchUrlArgs, config: FetchUrlConfig) -> str:
         follow_redirects=config.follow_redirects,
     )
     response.raise_for_status()
-    text = trafilatura.extract(response.text) or response.text
+    try:
+        import trafilatura
+
+        text = trafilatura.extract(response.text) or response.text
+    except Exception:
+        # Keep the tool usable even when optional extraction dependency is
+        # missing or fails for a specific page.
+        text = response.text
     return text[: config.max_read_chars]
 
 

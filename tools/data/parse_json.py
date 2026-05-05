@@ -25,8 +25,11 @@ def execute(args: ParseJsonArgs, config: ParseJsonConfig) -> Any:
 def build_pydantic_tool(config: ParseJsonConfig):
     def parse_json(text: str) -> Any:
         """Parse JSON text into structured data."""
-        args = ParseJsonArgs.model_validate({"text": text})
-        return execute(args, config)
+        try:
+            args = ParseJsonArgs.model_validate({"text": text})
+            return execute(args, config)
+        except Exception as exc:
+            return f"TOOL_ERROR data.parse_json failed: {type(exc).__name__}: {exc}"
 
     return parse_json
 

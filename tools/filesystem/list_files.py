@@ -45,10 +45,13 @@ def execute(args: ListFilesArgs, config: ListFilesConfig) -> list[str]:
 
 
 def build_pydantic_tool(config: ListFilesConfig):
-    def list_files(path: str = ".", glob: str = "**/*") -> list[str]:
+    def list_files(path: str = ".", glob: str = "**/*") -> list[str] | str:
         """List files under the configured workspace."""
-        args = ListFilesArgs.model_validate({"path": path, "glob": glob})
-        return execute(args, config)
+        try:
+            args = ListFilesArgs.model_validate({"path": path, "glob": glob})
+            return execute(args, config)
+        except Exception as exc:
+            return f"TOOL_ERROR filesystem.list_files failed for {path}: {type(exc).__name__}: {exc}"
 
     return list_files
 
