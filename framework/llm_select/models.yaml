@@ -1,0 +1,50 @@
+default_alias: local-focused
+
+models:
+  local-default:
+    provider: openai-compatible
+    name: qwen3.6
+    context_window_tokens: 180000
+    base_url: http://127.0.0.1:8000/v1
+    api_key: ${LOCAL_OPENAI_API_KEY}
+    model_settings:
+      temperature: 1.0
+      top_p: 0.95
+      presence_penalty: 1.5
+      max_tokens: 32768
+      timeout: 300
+      extra_body:
+        top_k: 20
+        min_p: 0.0
+        repetition_penalty: 1.0
+
+  local-focused:
+    provider: openai-compatible
+    name: qwen3.6
+    context_window_tokens: 180000
+    base_url: http://127.0.0.1:8000/v1
+    api_key: ${LOCAL_OPENAI_API_KEY}
+    model_settings:
+      temperature: 0.1
+      top_p: 0.6
+      presence_penalty: 0.0
+      max_tokens: 32768
+      timeout: 300
+      extra_body:
+        top_k: 10
+        min_p: 0.0
+        repetition_penalty: 1.15
+        enable_thinking: false
+
+  deepseekV4_flash:
+    provider: openai-compatible
+    name: deepseek-v4-flash
+    context_window_tokens: 1000000
+    base_url: https://api.deepseek.com/v1
+    api_key: ${DEEPSEEK_API_KEY}
+    model_settings:
+      temperature: 1.0
+      top_p: 0.95
+      presence_penalty: 1.5
+      max_tokens: 128000
+      timeout: 300

@@ -1,0 +1,101 @@
+## 任务：构建个人档案
+
+你现在在 workflow 项目目录下。查找 workflow/User/ 目录读取文件。
+
+### 当前框架可用工具名
+
+- `filesystem_list_files(path=".", glob="**/*")`：列出工作区文件。
+- `filesystem_read_file(path)`：读取工作区文本文件。
+- `filesystem_write_file(path, content)`：写入工作区文本文件。
+- `filesystem_search_text(query, path=".", glob="**/*")`：搜索工作区文本。
+- `data_parse_json(text)`：解析 JSON 字符串。
+- `web_fetch_url(url)`：GET 获取网页文本。
+- `web_extract_links(url)`：提取网页链接。
+- `web_post_url(url, data=None, headers=None)`：POST 获取网页文本。
+- `web_search(query)`：搜索网页。
+
+所有本地路径都相对于 workflow 工作区；写文件必须写入提示词指定的路径。
+
+
+请执行以下步骤：
+
+### 步骤 1：读取输入
+
+读取 `workflow/User/tutor_favor.json` 获取导师选择偏好。
+
+然后读取简历文件：找 `workflow/User/resume.*` 或 `workflow/User/cv.*` 或 `workflow/User/简历.*` 中最大的文件。
+如果存在 `workflow/meta/_resume_extracted.txt`，优先读取它作为简历正文。
+
+### 步骤 2：生成本人档案
+
+综合简历内容和导师偏好，生成 markdown 并写入 `workflow/User/profile.md`，必须包含以下章节：
+
+```markdown
+# 个人档案
+
+> 一句话概括：XXX
+
+## 基础信息
+
+- 姓名：（从简历提取，找不到写"待确认"）
+- 学校/专业：（从简历提取）
+- 年级：（从简历提取）
+- GPA/排名：（从简历提取）
+- 英语水平：（从简历提取）
+- 联系方式：（从简历提取，找不到写"待确认"）
+
+## 项目经历
+
+按重要性排序，每条：
+- **项目名称**（角色）— 时间
+  - 技术要点：XXX
+  - 成果/奖项：XXX
+
+## 技术栈
+
+- **核心领域：** XXX
+- **编程语言：** XXX
+- **框架/工具：** XXX
+- **硬件平台：** XXX
+
+## 荣誉与竞赛
+
+按时间倒序排列。
+
+## 导师选择偏好
+
+从 tutor_favor.json 中提取，按以下分类：
+
+### 评分维度
+- XXX（满分XX）：XXX
+
+### 加分特征
+- XXX — 必备
+- XXX — 重要
+- XXX — 加分
+
+### 扣分特征
+- XXX — 一票否决
+- XXX — 强烈减分
+- XXX — 轻微减分
+
+### 优先级阈值
+S≥XX, A≥XX, B≥XX, C≥XX
+
+### 自定义备注
+- XXX
+
+## 个人定位总结
+
+根据你的经历和偏好，总结最适合什么样的课题组、应避开什么样的课题组，用于导师筛选时的快速匹配参考。
+```
+
+### 步骤 3：写入文件
+
+使用 `filesystem_write_file` 工具将生成的 markdown 写入 `workflow/User/profile.md`。
+
+### 要求
+- 简历中明确有的信息必须保留，没有的字段写"待确认"
+- 项目经历用自然语言归纳，不要照搬原文
+- 导师选择偏好从 `tutor_favor.json` 原样提取，不要改动原意
+- 确认文件已写入后回复"个人档案已生成"

@@ -4,3 +4,4 @@ pyyaml
 beautifulsoup4
 trafilatura
 playwright>=1.52.0
+python-dotenv

@@ -1,0 +1,35 @@
+default_model_alias: local-focused
+step_model_aliases:
+  build-profile: local-focused
+  init-school: deepseekV4_flash
+  verify-school: local-focused
+  explore: deepseekV4_flash
+  condense-pattern: deepseekV4_flash
+  gen-prompts: local-focused
+  eval: local-focused
+  audit: local-focused
+usage_limits:
+  max_requests: unlimited
+  max_tool_calls: unlimited
+  max_output_tokens: unlimited
+  max_total_tokens: unlimited
+context_management:
+  enabled: false
+  threshold_ratio: 0.8
+  max_context_tokens: null
+  compact_model_alias: local-focused
+  chars_per_token: 4.0
+  max_serialized_chars_for_compactor: 120000
+  keep_recent_messages: 0
+  summarize_large_tool_results: true
+  large_tool_result_threshold_chars: 8000
+  max_tool_summaries_per_request: 2
+  tool_result_cache_dir: logs/context_cache
+  tool_result_summary_max_chars: 1800
+tool_limits:
+  max_file_read_chars: 200000
+  max_file_write_chars: 500000
+  max_web_read_chars: 100000
+  max_links: 300
+  max_search_results: 8
+  timeout_seconds: 45
