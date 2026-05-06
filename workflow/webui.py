@@ -36,6 +36,7 @@ MAX_TASK_LINES = 2000
 STATUS_TAIL_LINES = 300
 HEARTBEAT_INTERVAL_SECONDS = 15
 MAX_TASK_HISTORY = 120
+FRONTEND_MAX_RENDERED_LINES = 800
 WORKFLOW = TutorSelectWorkflow(PROJECT_ROOT)
 
 
@@ -281,26 +282,28 @@ def get_task_status(task_id):
     with _tasks_lock:
         t = _running_tasks.get(task_id)
         if t:
+            full_lines = t.get("lines", [])
+            line_count = t.get("line_count", len(full_lines))
+            lines = full_lines[-STATUS_TAIL_LINES:]
+            tail_start = max(0, line_count - len(lines))
             t = {
                 "done": t.get("done"),
                 "exit_code": t.get("exit_code"),
                 "cmd": t.get("cmd"),
-                "lines": list(t.get("lines", [])),
-                "line_count": t.get("line_count"),
+                "lines": list(lines),
+                "line_count": line_count,
+                "tail_start": tail_start,
                 "error_lines": list(t.get("error_lines", [])),
             }
     if not t:
         return {"done": True, "exit_code": -1, "lines": ["任务未找到"]}
-    lines = t["lines"][-STATUS_TAIL_LINES:]
-    line_count = t.get("line_count", len(t["lines"]))
-    tail_start = max(0, line_count - len(lines))
     return {
         "done": t["done"],
         "exit_code": t["exit_code"],
         "cmd": t["cmd"],
-        "lines": lines,
-        "line_count": line_count,
-        "tail_start": tail_start,
+        "lines": t["lines"],
+        "line_count": t["line_count"],
+        "tail_start": t["tail_start"],
         "error_lines": t.get("error_lines", [])[-40:],
     }
 
@@ -1036,6 +1039,25 @@ function renderLines(lines) {
   return (lines || []).map(l => '<span class="' + lineClass(l) + '">' + escape(l) + '</span>\n').join('');
 }
 
+const FRONTEND_MAX_RENDERED_LINES = 800;
+
+function appendLineNode(box, line) {
+  const span = document.createElement('span');
+  const cls = lineClass(line);
+  if (cls) span.className = cls;
+  span.textContent = line || '';
+  box.appendChild(span);
+  box.appendChild(document.createTextNode('\n'));
+}
+
+function trimOutputBox(box, maxLines) {
+  const maxNodes = maxLines * 2;
+  while (box.childNodes.length > maxNodes) {
+    box.removeChild(box.firstChild);
+    if (box.firstChild) box.removeChild(box.firstChild);
+  }
+}
+
 function appendTaskLines(box, st, lastCount) {
   const lines = st.lines || [];
   const tailStart = st.tail_start || Math.max(0, (st.line_count || lines.length) - lines.length);
@@ -1044,7 +1066,8 @@ function appendTaskLines(box, st, lastCount) {
   if (start > lines.length) start = 0;
   const newLines = lines.slice(start);
   if (newLines.length) {
-    box.innerHTML += renderLines(newLines);
+    for (const line of newLines) appendLineNode(box, line);
+    trimOutputBox(box, FRONTEND_MAX_RENDERED_LINES);
     box.scrollTop = box.scrollHeight;
   }
   return lineCount;
@@ -1052,6 +1075,15 @@ function appendTaskLines(box, st, lastCount) {
 
 let currentTaskId = null;
 let taskPoller = null;
+let taskPollingBusy = false;
+
+function clearAndRenderLines(box, lines, marker) {
+  box.textContent = '';
+  for (const line of (lines || [])) appendLineNode(box, line);
+  if (marker) appendLineNode(box, marker);
+  trimOutputBox(box, FRONTEND_MAX_RENDERED_LINES);
+  box.scrollTop = box.scrollHeight;
+}
 
 // 刷新后恢复未完成的任务
 async function resumeIncompleteTask() {
@@ -1069,33 +1101,41 @@ async function resumeIncompleteTask() {
     const btns = document.querySelectorAll("button");
     btns.forEach(b => b.disabled = true);
     let lastLen = st.line_count || st.lines.length;
-    box.innerHTML = renderLines(st.lines) + "\n<span class=\"t-info\">\u2190 刷新后恢复</span>\n";
+    clearAndRenderLines(box, st.lines, "← 刷新后恢复");
     barIn.style.width = Math.min(90, 5 + lastLen * 2) + "%";
     // 继续轮询
     taskPoller = setInterval(async () => {
-      const s = await api("/api/run-status?task_id=" + currentTaskId);
-      const nextLen = appendTaskLines(box, s, lastLen);
-      if (nextLen !== lastLen) {
-        lastLen = nextLen;
-        barIn.style.width = Math.min(90, 5 + lastLen * 2) + "%";
-      }
-      if (s.done) {
-        clearInterval(taskPoller);
-        taskPoller = null;
-        barIn.style.width = "100%";
-        setTimeout(() => { bar.style.display = "none"; }, 800);
-        btns.forEach(b => b.disabled = false);
-        if (s.exit_code !== 0) {
-          if (s.error_lines && s.error_lines.length) {
-            box.innerHTML += "\n<span class=\"t-err\">===== 错误摘要 =====</span>\n" + renderLines(s.error_lines);
-          }
-          box.innerHTML += "\n<span class=\"t-err\">✗ exit: " + s.exit_code + "</span>";
-        } else {
-          box.innerHTML += "\n<span class=\"t-ok\">✓ 完成</span>";
+      if (taskPollingBusy) return;
+      taskPollingBusy = true;
+      try {
+        const s = await api("/api/run-status?task_id=" + currentTaskId);
+        const nextLen = appendTaskLines(box, s, lastLen);
+        if (nextLen !== lastLen) {
+          lastLen = nextLen;
+          barIn.style.width = Math.min(90, 5 + lastLen * 2) + "%";
         }
-        refreshStatus();
-        refreshTokens();
-        refreshResults();
+        if (s.done) {
+          clearInterval(taskPoller);
+          taskPoller = null;
+          barIn.style.width = "100%";
+          setTimeout(() => { bar.style.display = "none"; }, 800);
+          btns.forEach(b => b.disabled = false);
+          if (s.exit_code !== 0) {
+            if (s.error_lines && s.error_lines.length) {
+              appendLineNode(box, "===== 错误摘要 =====");
+              for (const line of s.error_lines) appendLineNode(box, line);
+            }
+            appendLineNode(box, "✗ exit: " + s.exit_code);
+          } else {
+            appendLineNode(box, "✓ 完成");
+          }
+          trimOutputBox(box, FRONTEND_MAX_RENDERED_LINES);
+          refreshStatus();
+          refreshTokens();
+          refreshResults();
+        }
+      } finally {
+        taskPollingBusy = false;
       }
     }, 1000);
   }
@@ -1387,6 +1427,11 @@ async function resumeEval() {
 // ── 执行命令 ──
 
 async function runCmd(cmd, label) {
+  if (taskPoller) {
+    clearInterval(taskPoller);
+    taskPoller = null;
+  }
+  taskPollingBusy = false;
   const btns = document.querySelectorAll('button');
   btns.forEach(b => b.disabled = true);
 
@@ -1394,7 +1439,7 @@ async function runCmd(cmd, label) {
   const bar = document.getElementById('progressBar');
   const barIn = document.getElementById('progressBarIn');
   box.style.display = 'block';
-  box.innerHTML = '<span class="t-info">▶ 启动: ' + escape(label) + '...</span>\n';
+  clearAndRenderLines(box, ['▶ 启动: ' + label + '...']);
   bar.style.display = 'block';
   barIn.style.width = '5%';
 
@@ -1405,32 +1450,40 @@ async function runCmd(cmd, label) {
   // 轮询状态
   let lastLen = 0;
   taskPoller = setInterval(async () => {
-    const st = await api('/api/run-status?task_id=' + currentTaskId);
-    // 追加新行
-    const nextLen = appendTaskLines(box, st, lastLen);
-    if (nextLen !== lastLen) {
-      lastLen = nextLen;
-      // 进度动画
-      barIn.style.width = Math.min(90, 5 + lastLen * 2) + '%';
-    }
-    if (st.done) {
-      clearInterval(taskPoller);
-      taskPoller = null;
-      barIn.style.width = '100%';
-      setTimeout(() => { bar.style.display = 'none'; }, 800);
-      btns.forEach(b => b.disabled = false);
-      if (st.exit_code !== 0) {
-        if (st.error_lines && st.error_lines.length) {
-          box.innerHTML += '\n<span class="t-err">===== 错误摘要 =====</span>\n' + renderLines(st.error_lines);
-        }
-        box.innerHTML += '\n<span class="t-err">✗ exit: ' + st.exit_code + '</span>';
-      } else {
-        box.innerHTML += '\n<span class="t-ok">✓ 完成</span>';
+    if (taskPollingBusy) return;
+    taskPollingBusy = true;
+    try {
+      const st = await api('/api/run-status?task_id=' + currentTaskId);
+      // 追加新行
+      const nextLen = appendTaskLines(box, st, lastLen);
+      if (nextLen !== lastLen) {
+        lastLen = nextLen;
+        // 进度动画
+        barIn.style.width = Math.min(90, 5 + lastLen * 2) + '%';
       }
-      // 刷新数据
-      refreshStatus();
-      refreshTokens();
-      refreshResults();
+      if (st.done) {
+        clearInterval(taskPoller);
+        taskPoller = null;
+        barIn.style.width = '100%';
+        setTimeout(() => { bar.style.display = 'none'; }, 800);
+        btns.forEach(b => b.disabled = false);
+        if (st.exit_code !== 0) {
+          if (st.error_lines && st.error_lines.length) {
+            appendLineNode(box, '===== 错误摘要 =====');
+            for (const line of st.error_lines) appendLineNode(box, line);
+          }
+          appendLineNode(box, '✗ exit: ' + st.exit_code);
+        } else {
+          appendLineNode(box, '✓ 完成');
+        }
+        trimOutputBox(box, FRONTEND_MAX_RENDERED_LINES);
+        // 刷新数据
+        refreshStatus();
+        refreshTokens();
+        refreshResults();
+      }
+    } finally {
+      taskPollingBusy = false;
     }
   }, 1000);
 }
