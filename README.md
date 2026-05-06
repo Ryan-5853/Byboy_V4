@@ -83,6 +83,14 @@ Windows：
 .venv\Scripts\python.exe workflow\webui.py
 ```
 
+启动后在浏览器中打开本地地址：
+
+```text
+http://localhost:8897
+```
+
+如果你在 `.env` 里改了 `WEBUI_PORT`，就把这里的端口换成对应值。
+
 ### 参数配置
 
 模板初始化和本地实例分离，必须先运行 `init_project.py`。
