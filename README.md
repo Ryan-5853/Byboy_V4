@@ -16,6 +16,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python3 -m playwright install chromium
 cp .env.example .env
+python3 init_project.py
 ```
 
 ## 敏感信息配置
@@ -82,15 +83,18 @@ api_key: ${DEEPSEEK_API_KEY}
 
 ### 3. 用户输入层
 
-- [workflow/User/tutor_favor.json](/workflow/User/tutor_favor.json)：导师偏好
+- `templates/workflow/User/tutor_favor.json`：导师偏好模板（Git 跟踪）
+- `workflow/User/tutor_favor.json`：本地导师偏好实例（`python3 init_project.py` 自动生成/更新）
 - `workflow/User/resume.*`：简历源文件
 - `workflow/User/profile.md`：由 `build-profile` 自动生成
 - [workflow/User/README.md](/workflow/User/README.md)：用户输入说明
 
 ### 4. 运行数据层
 
-- [workspace/school_info.json](/workspace/school_info.json)
-- `workspace/active_project.json`
+- `templates/workspace/school_info.json`：初始化模板（Git 跟踪）
+- `templates/workspace/active_project.json`：当前项目模板（Git 跟踪）
+- `workspace/school_info.json`：本地初始化配置实例
+- `workspace/active_project.json`：本地当前激活学院实例
 - `workspace/<学校>_<学院>/...`
 
 用途：
@@ -105,6 +109,7 @@ api_key: ${DEEPSEEK_API_KEY}
 
 说明：
 
+- 首次克隆或模板更新后，先运行 `python3 init_project.py`
 - 初始化完成后，实际工作流不再依赖 `workspace/school_info.json` 里的 `project_id`
 - 每个学院目录现在自带自己的 `project_info.json`
 - WebUI 会根据 `active_project.json` 动态切换当前学院

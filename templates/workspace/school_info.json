@@ -1,0 +1,14 @@
+{
+  "// note": "Initialization input for the first init-school run.",
+  "// instructions": "Fill school_name, academy_name, and homepage_url before running init-school.",
+  "// version": "1.0",
+  "version": "1.0",
+  "school_name": "",
+  "academy_name": "",
+  "homepage_url": "",
+  "// fields": {
+    "school_name": "University name, for example Harbin Institute of Technology",
+    "academy_name": "School or academy name, for example School of Electronic and Information Engineering",
+    "homepage_url": "Faculty list or academy homepage URL"
+  }
+}

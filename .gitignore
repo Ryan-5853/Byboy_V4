@@ -21,12 +21,9 @@ logs/
 workflow/.audit/
 teacher_body_raw.html
 workspace/*
-!workspace/active_project.json
-!workspace/school_info.json
 
 workflow/User/*
 !workflow/User/README.md
-!workflow/User/tutor_favor.json
 
 # IDEs
 .vscode/
