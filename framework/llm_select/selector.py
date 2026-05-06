@@ -13,6 +13,8 @@ from .schemas import LLMConfig, ModelConfig
 class LLMSelector:
     """Resolve model aliases into pydantic-ai model instances."""
 
+    _LOCAL_DUMMY_API_KEY = "EMPTY"
+
     def __init__(
         self,
         config: LLMConfig | None = None,
@@ -64,8 +66,7 @@ class LLMSelector:
                 provider_kwargs: dict[str, Any] = {}
                 if config.base_url:
                     provider_kwargs["base_url"] = config.base_url
-                if config.api_key:
-                    provider_kwargs["api_key"] = config.api_key
+                provider_kwargs["api_key"] = config.api_key or self._LOCAL_DUMMY_API_KEY
                 provider_config = OpenAIProvider(**provider_kwargs)
             elif config.api_key:
                 provider_config = OpenAIProvider(api_key=config.api_key)
