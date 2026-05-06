@@ -13,7 +13,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 TEMPLATES_ROOT = ROOT / "templates"
 MERGE_KEY_CANDIDATES = ("name", "id", "key", "alias", "project_id")
-READ_ENCODINGS = ("utf-8", "utf-8-sig", "latin-1")
+READ_ENCODINGS = ("utf-8", "utf-8-sig", "gb18030", "gbk", "latin-1")
+MOJIBAKE_MARKERS = tuple("ÃÂÐÑÒÓÔÕÖ×ÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ¶·¸¹º»¼½¾¿")
 
 
 @dataclass(frozen=True)
@@ -215,8 +216,11 @@ def select_merge_key(template_items: list[Any], local_items: list[Any]) -> str |
 
 def merge_values(template_value: Any, local_value: Any) -> Any:
     if isinstance(template_value, dict) and isinstance(local_value, dict):
-        merged = dict(local_value)
+        merged = {key: value for key, value in local_value.items() if not str(key).startswith("//")}
         for key, template_child in template_value.items():
+            if key.startswith("//"):
+                merged[key] = template_child
+                continue
             if key in local_value:
                 merged[key] = merge_values(template_child, local_value[key])
             else:
@@ -243,7 +247,30 @@ def merge_values(template_value: Any, local_value: Any) -> Any:
             return merged_items
         return local_value if local_value else template_value
 
+    if isinstance(local_value, str):
+        repaired = repair_mojibake(local_value)
+        if repaired is not None:
+            return repaired
     return local_value
+
+
+def repair_mojibake(value: str) -> str | None:
+    if not looks_like_mojibake(value):
+        return None
+    try:
+        repaired = value.encode("latin-1").decode("gb18030")
+    except Exception:
+        return None
+    return repaired if repaired != value else None
+
+
+def looks_like_mojibake(value: str) -> bool:
+    if not value:
+        return False
+    marker_hits = sum(1 for ch in value if ch in MOJIBAKE_MARKERS)
+    if marker_hits >= 2:
+        return True
+    return "�" in value
 
 
 def sync_spec(spec: TemplateSpec, dry_run: bool) -> str:
