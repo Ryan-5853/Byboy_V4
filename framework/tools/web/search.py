@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
+import time
 from html import unescape
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 from collections import deque
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +19,9 @@ class SearchConfig(BaseModel):
     max_results: int = Field(default=8, ge=1, le=30)
     max_read_chars: int = Field(default=12000, ge=1, le=200000)
     timeout_seconds: float = Field(default=20, gt=0, le=120)
+    backend: Literal["auto", "searxng", "duckduckgo"] = "auto"
+    searxng_url: str | None = None
+    auto_start_searxng: bool = True
 
 
 class SearchArgs(BaseModel):
@@ -21,9 +29,57 @@ class SearchArgs(BaseModel):
 
 
 _RECENT_EMPTY_QUERIES: deque[str] = deque(maxlen=12)
+_LAST_SEARXNG_START_ATTEMPT = 0.0
+_SEARXNG_START_COOLDOWN_SECONDS = 60.0
 
 
 def execute(args: SearchArgs, config: SearchConfig) -> list[dict[str, str]]:
+    if config.backend in {"auto", "searxng"}:
+        try:
+            results = _execute_searxng(args, config)
+            if results or config.backend == "searxng":
+                return results[: config.max_results]
+        except Exception:
+            if config.backend == "searxng":
+                raise
+
+    return _execute_duckduckgo(args, config)
+
+
+def _execute_searxng(args: SearchArgs, config: SearchConfig) -> list[dict[str, str]]:
+    import httpx
+
+    base_url = _discover_searxng_url(config)
+    if not base_url and config.auto_start_searxng:
+        _try_start_searxng_once()
+        base_url = _discover_searxng_url(config)
+    if not base_url:
+        raise RuntimeError("SearXNG service not discovered")
+
+    response = httpx.get(
+        urljoin(base_url.rstrip("/") + "/", "search"),
+        params={"q": args.query, "format": "json", "language": "auto", "safesearch": "0"},
+        timeout=config.timeout_seconds,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    data = response.json()
+    raw_results = data.get("results", []) if isinstance(data, dict) else []
+    output: list[dict[str, str]] = []
+    for item in raw_results:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        url = str(item.get("url") or "").strip()
+        snippet = str(item.get("content") or item.get("snippet") or "").strip()
+        if title and url:
+            output.append({"title": title, "url": url, "snippet": snippet})
+        if len(output) >= config.max_results:
+            break
+    return output
+
+
+def _execute_duckduckgo(args: SearchArgs, config: SearchConfig) -> list[dict[str, str]]:
     import httpx
 
     url = "https://duckduckgo.com/html/?" + urlencode({"q": args.query})
@@ -32,6 +88,108 @@ def execute(args: SearchArgs, config: SearchConfig) -> list[dict[str, str]]:
     html = response.text[: config.max_read_chars]
     results = _parse_duckduckgo_html(html)
     return results[: config.max_results]
+
+
+def _discover_searxng_url(config: SearchConfig) -> str | None:
+    import httpx
+
+    candidates = []
+    if config.searxng_url:
+        candidates.append(config.searxng_url)
+    env_url = os.environ.get("SEARXNG_URL") or os.environ.get("SEARXNG_BASE_URL")
+    if env_url:
+        candidates.append(env_url)
+    candidates.extend(
+        [
+            "http://127.0.0.1:8080",
+            "http://localhost:8080",
+            "http://127.0.0.1:8888",
+            "http://localhost:8888",
+            "http://127.0.0.1:4000",
+            "http://localhost:4000",
+        ]
+    )
+
+    seen: set[str] = set()
+    for raw in candidates:
+        base_url = raw.rstrip("/")
+        if not base_url or base_url in seen:
+            continue
+        seen.add(base_url)
+        try:
+            response = httpx.get(
+                urljoin(base_url + "/", "search"),
+                params={"q": "searxng", "format": "json"},
+                timeout=min(2.0, config.timeout_seconds),
+                follow_redirects=True,
+            )
+            if response.status_code == 200 and _looks_like_searxng_json(response):
+                return base_url
+        except Exception:
+            continue
+    return None
+
+
+def _looks_like_searxng_json(response: object) -> bool:
+    try:
+        data = response.json()  # type: ignore[attr-defined]
+    except Exception:
+        return False
+    return isinstance(data, dict) and isinstance(data.get("results"), list)
+
+
+def _try_start_searxng_once() -> None:
+    global _LAST_SEARXNG_START_ATTEMPT
+    now = time.time()
+    if now - _LAST_SEARXNG_START_ATTEMPT < _SEARXNG_START_COOLDOWN_SECONDS:
+        return
+    _LAST_SEARXNG_START_ATTEMPT = now
+
+    for command in _searxng_start_commands():
+        try:
+            subprocess.run(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+                check=False,
+            )
+        except Exception:
+            continue
+
+
+def _searxng_start_commands() -> list[list[str]]:
+    commands: list[list[str]] = []
+    if shutil.which("systemctl"):
+        commands.append(["systemctl", "--user", "start", "searxng"])
+        commands.append(["systemctl", "start", "searxng"])
+    if shutil.which("docker"):
+        for name in _docker_searxng_container_names():
+            commands.append(["docker", "start", name])
+    return commands
+
+
+def _docker_searxng_container_names() -> list[str]:
+    if not shutil.which("docker"):
+        return []
+    try:
+        completed = subprocess.run(
+            ["docker", "ps", "-a", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return []
+    names = []
+    for line in completed.stdout.splitlines():
+        name = line.strip()
+        if name and "searxng" in name.lower():
+            names.append(name)
+    if "searxng" not in names:
+        names.append("searxng")
+    return names
 
 
 def _parse_duckduckgo_html(html: str) -> list[dict[str, str]]:

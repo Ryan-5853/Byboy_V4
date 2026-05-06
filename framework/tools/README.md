@@ -276,6 +276,9 @@ tools:
       max_results: 8
       max_read_chars: 12000
       timeout_seconds: 20
+      backend: auto
+      searxng_url: http://127.0.0.1:8080
+      auto_start_searxng: true
 ```
 
 调用参数：
@@ -284,9 +287,15 @@ tools:
 {"query": "哈尔滨工业大学 电子与信息工程学院 导师名录"}
 ```
 
-配置字段：`max_results` 限制返回条数；`max_read_chars` 限制搜索结果页读取长度；`timeout_seconds` 限制 HTTP 请求超时。
+配置字段：`max_results` 限制返回条数；`max_read_chars` 限制搜索结果页读取长度；`timeout_seconds` 限制 HTTP 请求超时；`backend` 可选 `auto`、`searxng`、`duckduckgo`，默认 `auto`；`searxng_url` 可指定本地 SearXNG 地址；`auto_start_searxng` 控制是否在本地 SearXNG 未响应时尝试启动服务。
 
 调用字段：`query` 是搜索关键词。
+
+搜索后端：
+- `auto` 会优先探测本地 SearXNG JSON API，候选地址包括 `SEARXNG_URL`、显式 `searxng_url`、`127.0.0.1:8080`、`8888`、`4000` 等常见本地端口。
+- 如果本地 SearXNG 没有响应，工具会 best-effort 尝试启动 `systemctl --user start searxng`、`systemctl start searxng`，以及 Docker 中名称包含 `searxng` 的容器。
+- SearXNG 探测、启动或搜索失败都不会让工具整体失效；`backend: auto` 会回退到原有 DuckDuckGo HTML 搜索。
+- 如果设置 `backend: searxng`，SearXNG 失败会作为工具失败返回，适合调试本地服务。
 
 特殊行为（软引导）：
 - 当搜索结果为空时，工具会返回 `TOOL_ERROR` 提示，建议切换信息源类型（如 `web_fetch_url`、`browser_render_page`、`browser_capture_requests`），避免同类关键词反复重试。

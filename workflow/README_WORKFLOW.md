@@ -130,6 +130,7 @@ workflow/config/workflow.yaml
 - `usage_limits`：传给 pydantic-ai 的运行限制。`max_total_tokens: unlimited` 表示不限制总 token 流量。
 - `context_management`：上下文压缩配置；默认在 80% 阈值触发。
 - `tool_limits`：本工作流给工具层的硬限制，如文件读写长度、网页读取长度、链接数量和超时。
+- `tool_limits.search_backend`：网页搜索后端，默认 `auto`。会优先使用本地 SearXNG，失败时回退到内置 DuckDuckGo 搜索；可配 `searxng_url` 和 `auto_start_searxng`。
 
 命令行 `--model <alias>` 会覆盖本次命令的所有步骤：
 

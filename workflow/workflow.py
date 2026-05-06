@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,9 @@ except ImportError:
 
 class WorkflowError(RuntimeError):
     pass
+
+
+AGENT_PROMPT_INJECTION_HEADER = "用户临时纠偏提示（仅当前学院 / 当前 agent 类型生效）"
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -59,6 +63,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "max_requests": 16,
             "max_tool_calls": 24,
         },
+    },
+    "agent_retry": {
+        "max_attempts": 3,
+        "initial_delay_seconds": 2.0,
+        "max_delay_seconds": 12.0,
     },
     "context_management": {
         "enabled": True,
@@ -96,6 +105,7 @@ class TutorSelectWorkflow:
         self.config = self._load_workflow_config()
         self._state_lock = threading.Lock()
         self.active_project_file = self.workspace_dir / "active_project.json"
+        self.prompt_injections_file = self.config_dir / "agent_prompt_injections.json"
 
     def _resolve_roots(self, root: str | Path | None) -> tuple[Path, Path]:
         if root is None:
@@ -666,19 +676,142 @@ class TutorSelectWorkflow:
         model_alias: str | None,
         per_step_model: bool,
     ) -> Any:
-        config_file = self._write_agent_config(step, prompt_file, model_alias, per_step_model)
-        self._log(f"[agent] step={step} prompt={self._rel(prompt_file)} config={self._rel(config_file)}")
+        effective_prompt = self._prompt_file_with_injection(step, prompt_file)
+        config_file = self._write_agent_config(step, effective_prompt, model_alias, per_step_model)
+        self._log(f"[agent] step={step} prompt={self._rel(effective_prompt)} config={self._rel(config_file)}")
         router = AgentRouter(llm_config_file=self.framework_root / "llm_select" / "models.yaml")
-        result = router.run_sync(
-            RouterRequest(prompt_file=prompt_file, config_file=config_file, raise_on_error=False)
-        )
-        if result.status != "ok":
+        retry_config = self._agent_retry_config(step)
+        max_attempts = retry_config["max_attempts"]
+        for attempt in range(1, max_attempts + 1):
+            if attempt > 1:
+                self._log(f"[agent-retry] step={step} attempt={attempt}/{max_attempts}")
+            result = router.run_sync(
+                RouterRequest(prompt_file=effective_prompt, config_file=config_file, raise_on_error=False)
+            )
+            if result.status == "ok":
+                if result.usage:
+                    self._log(f"[usage] {json.dumps(result.usage, ensure_ascii=False)}")
+                return result
+
             error = result.error.message if result.error else "unknown error"
             category = result.error.category if result.error else "unknown"
-            raise WorkflowError(f"subagent 执行失败 step={step} category={category}: {error}")
-        if result.usage:
-            self._log(f"[usage] {json.dumps(result.usage, ensure_ascii=False)}")
-        return result
+            if attempt >= max_attempts or not self._should_retry_agent_error(result.error):
+                raise WorkflowError(f"subagent 执行失败 step={step} category={category}: {error}")
+
+            delay = self._agent_retry_delay(retry_config, attempt)
+            self._log(
+                f"[agent-retry] step={step} category={category} "
+                f"attempt={attempt}/{max_attempts} delay={delay:.1f}s error={error}"
+            )
+            time.sleep(delay)
+
+        raise WorkflowError(f"subagent 执行失败 step={step}: retry loop exhausted")
+
+    def _agent_retry_config(self, step: str) -> dict[str, float | int]:
+        base = dict(self.config.get("agent_retry", {}))
+        step_overrides = self.config.get("step_agent_retry", {}).get(step, {})
+        if isinstance(step_overrides, dict):
+            base.update(step_overrides)
+        max_attempts = _coerce_int(base.get("max_attempts"), default=3, minimum=1, maximum=5)
+        return {
+            "max_attempts": max_attempts,
+            "initial_delay_seconds": _coerce_float(base.get("initial_delay_seconds"), default=2.0, minimum=0.0, maximum=60.0),
+            "max_delay_seconds": _coerce_float(base.get("max_delay_seconds"), default=12.0, minimum=0.0, maximum=120.0),
+        }
+
+    def _agent_retry_delay(self, config: dict[str, float | int], attempt: int) -> float:
+        initial = float(config["initial_delay_seconds"])
+        maximum = float(config["max_delay_seconds"])
+        delay = min(maximum, initial * (2 ** max(0, attempt - 1)))
+        return delay + random.uniform(0, min(1.0, delay * 0.25))
+
+    def _should_retry_agent_error(self, error: Any) -> bool:
+        if error is None:
+            return True
+        category = str(getattr(error, "category", "") or "")
+        message = str(getattr(error, "message", "") or "").lower()
+        details = getattr(error, "details", {}) or {}
+
+        if category in {"usage_limit_exceeded", "context_overflow"}:
+            return False
+        if category == "context_or_output_limit":
+            return True
+        if category in {"model_api_error", "unexpected_model_behavior", "agent_run_error", "unexpected_error"}:
+            return True
+        if category == "model_http_error":
+            status_code = details.get("status_code") if isinstance(details, dict) else None
+            try:
+                status_code = int(status_code)
+            except (TypeError, ValueError):
+                status_code = None
+            return status_code in {408, 409, 425, 429, 500, 502, 503, 504}
+
+        transient_markers = [
+            "incomplete chunked read",
+            "peer closed connection",
+            "connection error",
+            "connection reset",
+            "read timeout",
+            "timeout",
+            "temporarily unavailable",
+            "server disconnected",
+            "remote protocol error",
+        ]
+        return any(marker in message for marker in transient_markers)
+
+    def _prompt_file_with_injection(self, step: str, prompt_file: Path) -> Path:
+        injection = self._prompt_injection_for(step, prompt_file)
+        if not injection:
+            return prompt_file
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        prompt = prompt_file.read_text(encoding="utf-8")
+        injected_prompt = (
+            f"{prompt.rstrip()}\n\n"
+            "==================== "
+            f"{AGENT_PROMPT_INJECTION_HEADER}"
+            " ====================\n"
+            "这段内容由 WebUI 注入，优先级高于上文中与其冲突的细节；"
+            "只用于纠正当前学院和当前最细分 agent 类型的已知错误。\n\n"
+            f"{injection.strip()}\n"
+            "==================== 临时纠偏提示结束 ====================\n"
+        )
+        path = self.run_dir / f"{prompt_file.stem}.{step}.injected.{uuid4().hex[:8]}.txt"
+        path.write_text(injected_prompt, encoding="utf-8")
+        self._log(f"[agent-injection] step={step} source={self._rel(prompt_file)} effective={self._rel(path)}")
+        return path
+
+    def _prompt_injection_for(self, step: str, prompt_file: Path) -> str:
+        project_id = self._project_id_for_prompt(prompt_file)
+        if not project_id or not self.prompt_injections_file.is_file():
+            return ""
+        try:
+            data = json.loads(self.prompt_injections_file.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+        if not isinstance(data, dict):
+            return ""
+        project_data = data.get(project_id, {})
+        if not isinstance(project_data, dict):
+            return ""
+        item = project_data.get(step, {})
+        if not isinstance(item, dict):
+            return ""
+        return str(item.get("content") or "").strip()
+
+    def _project_id_for_prompt(self, prompt_file: Path) -> str:
+        try:
+            rel = prompt_file.resolve().relative_to(self.workspace_dir.resolve())
+            if rel.parts:
+                return rel.parts[0]
+        except ValueError:
+            pass
+        try:
+            active = json.loads(self.active_project_file.read_text(encoding="utf-8"))
+            if isinstance(active, dict):
+                return str(active.get("active_project_id") or "")
+        except Exception:
+            return ""
+        return ""
 
     def _write_agent_config(
         self,
@@ -884,10 +1017,13 @@ class TutorSelectWorkflow:
             },
             {
                 "name": "web.search",
-                "config": {
+                "config": _without_none({
                     "max_results": int(limits.get("max_search_results", 8)),
                     "timeout_seconds": float(limits.get("timeout_seconds", 45)),
-                },
+                    "backend": limits.get("search_backend"),
+                    "searxng_url": limits.get("searxng_url"),
+                    "auto_start_searxng": limits.get("auto_start_searxng"),
+                }),
             },
             {
                 "name": "web.download_file",
@@ -1389,6 +1525,26 @@ def _prompt_sort_key(path: Path) -> tuple[int, str]:
 def _eval_file_sort_key(path: Path) -> tuple[int, str]:
     match = re.search(r"_(\d+)_", path.name)
     return (int(match.group(1)) if match else 999999, path.name)
+
+
+def _coerce_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        result = default
+    return max(minimum, min(maximum, result))
+
+
+def _coerce_float(value: Any, *, default: float, minimum: float, maximum: float) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        result = default
+    return max(minimum, min(maximum, result))
+
+
+def _without_none(data: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in data.items() if value is not None}
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

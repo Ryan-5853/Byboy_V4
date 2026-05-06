@@ -13,6 +13,10 @@ usage_limits:
   max_tool_calls: unlimited
   max_output_tokens: unlimited
   max_total_tokens: unlimited
+agent_retry:
+  max_attempts: 3
+  initial_delay_seconds: 2.0
+  max_delay_seconds: 12.0
 context_management:
   enabled: false
   threshold_ratio: 0.8
@@ -32,4 +36,7 @@ tool_limits:
   max_web_read_chars: 100000
   max_links: 300
   max_search_results: 8
+  search_backend: auto
+  searxng_url: ''
+  auto_start_searxng: true
   timeout_seconds: 45

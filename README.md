@@ -115,6 +115,38 @@ http://localhost:8897
 
 如果你在 `.env` 里改了 `WEBUI_PORT`，就把这里的端口换成对应值。
 
+### 可选：本地 SearXNG 搜索服务
+
+`web_search` 默认会优先尝试本地 SearXNG，找不到或请求失败时自动回退到内置 DuckDuckGo HTML 搜索，因此没有安装 SearXNG 的环境也可以正常运行。
+
+推荐用 Docker 安装一个本地 SearXNG：
+
+```bash
+docker run -d --name searxng \
+  -p 8080:8080 \
+  -v searxng-data:/etc/searxng \
+  searxng/searxng:latest
+```
+
+启动后确认 JSON 搜索可用：
+
+```bash
+curl 'http://127.0.0.1:8080/search?q=test&format=json'
+```
+
+如果这个接口返回的不是 JSON，请检查 SearXNG 的 `settings.yml`，确保搜索格式包含 `json`，例如 `search.formats` 中启用了 `json`。
+
+如果你使用的端口不是 `8080`，可以在 `workflow/config/workflow.yaml` 里设置：
+
+```yaml
+tool_limits:
+  search_backend: auto
+  searxng_url: http://127.0.0.1:8080
+  auto_start_searxng: true
+```
+
+`auto_start_searxng: true` 会在本地服务没起来时做一次轻量启动尝试：优先尝试 `systemctl` 的 `searxng` 服务，其次尝试启动 Docker 中名称包含 `searxng` 的容器。启动失败不会中断流程，会直接回退到内置搜索。
+
 ### 参数配置
 
 模板初始化和本地实例分离，必须先运行 `init_project.py`。

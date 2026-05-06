@@ -424,6 +424,19 @@ def get_token_summary():
 
 WORKFLOW_CONFIG_FILE = os.path.join(ROOT, "config", "workflow.yaml")
 LLM_CONFIG_FILE = os.path.join(FRAMEWORK_ROOT, "llm_select", "models.yaml")
+AGENT_PROMPT_INJECTIONS_FILE = os.path.join(ROOT, "config", "agent_prompt_injections.json")
+
+AGENT_PROMPT_INJECTION_TYPES = [
+    {"key": "init-school", "label": "初始化学校 / 提取 agent", "phase": "init-school"},
+    {"key": "verify-school", "label": "初始化学校 / 校验 agent", "phase": "init-school"},
+    {"key": "repair-school", "label": "初始化学校 / 修复 agent", "phase": "init-school"},
+    {"key": "explore", "label": "页面探索 / 探索 agent", "phase": "explore"},
+    {"key": "condense-pattern", "label": "页面探索 / 策略精简 agent", "phase": "explore"},
+    {"key": "gen-prompts", "label": "生成 Prompt / Prompt agent", "phase": "gen-prompts"},
+    {"key": "eval", "label": "全量分析 / 单导师评分 agent", "phase": "eval"},
+    {"key": "audit", "label": "汇总报告 / 审计 agent", "phase": "audit"},
+    {"key": "build-profile", "label": "个人档案 / 档案 agent", "phase": "build-profile"},
+]
 
 # 步骤名映射 — 前端显示名 → workflow.yaml key
 STEP_KEYS = [
@@ -537,6 +550,91 @@ def set_step_model(ui_key, model_id):
     else:
         return {"error": f"unknown step: {ui_key}"}
     return save_model_config(cfg)
+
+
+def _read_agent_prompt_injections():
+    data, error = _safe_load_json(AGENT_PROMPT_INJECTIONS_FILE)
+    if error == "missing":
+        return {}
+    if error or not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _write_agent_prompt_injections(data):
+    import tempfile
+    os.makedirs(os.path.dirname(AGENT_PROMPT_INJECTIONS_FILE), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        suffix=".tmp",
+        dir=os.path.dirname(AGENT_PROMPT_INJECTIONS_FILE),
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp, AGENT_PROMPT_INJECTIONS_FILE)
+        return {"success": True}
+    except Exception as e:
+        try:
+            os.unlink(tmp)
+        except:
+            pass
+        return {"error": str(e)}
+
+
+def get_agent_prompt_injections():
+    status = get_project_status()
+    project_id = status.get("pid") or status.get("active_project_id")
+    data = _read_agent_prompt_injections()
+    project_data = data.get(project_id, {}) if project_id else {}
+    if not isinstance(project_data, dict):
+        project_data = {}
+    items = []
+    for item in AGENT_PROMPT_INJECTION_TYPES:
+        saved = project_data.get(item["key"], {})
+        if not isinstance(saved, dict):
+            saved = {}
+        content = str(saved.get("content") or "")
+        items.append({
+            **item,
+            "content": content,
+            "enabled": bool(content.strip()),
+            "updated_at": saved.get("updated_at", ""),
+        })
+    return {
+        "project_id": project_id,
+        "types": items,
+        "cache_file": AGENT_PROMPT_INJECTIONS_FILE,
+    }
+
+
+def save_agent_prompt_injection(agent_type, content, project_id=None):
+    known = {item["key"] for item in AGENT_PROMPT_INJECTION_TYPES}
+    if agent_type not in known:
+        return {"error": f"unknown agent_type: {agent_type}"}
+    project_id = str(project_id or "").strip()
+    if not project_id:
+        status = get_project_status()
+        project_id = status.get("pid") or status.get("active_project_id")
+    if not project_id:
+        return {"error": "当前没有激活学院"}
+    data = _read_agent_prompt_injections()
+    project_data = data.setdefault(project_id, {})
+    text = str(content or "")
+    if text.strip():
+        project_data[agent_type] = {
+            "content": text,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        }
+    else:
+        project_data.pop(agent_type, None)
+    if not project_data:
+        data.pop(project_id, None)
+    result = _write_agent_prompt_injections(data)
+    if result.get("error"):
+        return result
+    return {"success": True, "project_id": project_id, "agent_type": agent_type}
 
 
 def _read_workflow_config():
@@ -782,6 +880,8 @@ class Handler(BaseHTTPRequestHandler):
             self.json_response(get_eval_progress())
         elif path == "/api/projects":
             self.json_response(get_projects_payload())
+        elif path == "/api/agent-prompt-injections":
+            self.json_response(get_agent_prompt_injections())
         elif path == "/api/available-models":
             self.json_response({"models": get_available_models(), "step_models": get_step_models(), "default_model": _default_model_id()})
         elif path == "/api/read-file":
@@ -843,6 +943,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(set_step_model(step, model_id))
             else:
                 self.json_response({"error": "missing step"})
+        elif path == "/api/agent-prompt-injection":
+            agent_type = data.get("agent_type", "")
+            content = data.get("content", "")
+            project_id = data.get("project_id", "")
+            if agent_type:
+                self.json_response(save_agent_prompt_injection(agent_type, content, project_id=project_id))
+            else:
+                self.json_response({"error": "missing agent_type"})
         else:
             self.send_error(404)
 
@@ -894,6 +1002,12 @@ h1{font-size:22px;margin-bottom:16px}
 #outputBox .t-info{color:#60a5fa}#outputBox .t-ok{color:#34d399}#outputBox .t-err{color:#f87171}#outputBox .t-warn{color:#fbbf24}#outputBox .t-tok{color:#c084fc}
 #progressBar{height:4px;background:#e5e7eb;border-radius:2px;margin-top:8px;overflow:hidden;display:none}
 #progressBarIn{height:100%;background:#2563eb;border-radius:2px;transition:width .5s;width:0%}
+.agent-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.agent-tab{font-size:12px;padding:5px 9px}
+.agent-tab-active{background:#2563eb!important;color:#fff!important}
+.agent-tab-enabled::after{content:' · 已启用';font-size:10px;color:#059669}
+.agent-injection-editor{width:100%;min-height:150px;box-sizing:border-box;background:#fff7ed;color:#431407;border:1px solid #fb923c;border-radius:6px;padding:10px;font-family:monospace;font-size:12px;line-height:1.5;resize:vertical}
+.agent-injection-editor:focus{outline:2px solid #fdba74;outline-offset:1px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{padding:7px 8px;text-align:left;border-bottom:1px solid #eee}
 th{color:#666;font-weight:600;position:sticky;top:0;background:#f8f9fb;font-size:12px}
@@ -971,6 +1085,21 @@ tr:hover{background:#f8f9fb}
 
   <div id="progressBar"><div id="progressBarIn"></div></div>
   <div id="outputBox"></div>
+</div>
+
+<div class="card">
+  <h2>📌 Agent 临时纠偏提示 <span id="agentInjectionProject" style="font-weight:normal;font-size:12px;color:#777;margin-left:8px"></span></h2>
+  <div id="agentInjectionLoading" class="loading">加载中...</div>
+  <div id="agentInjectionContent" style="display:none">
+    <div id="agentInjectionTabs" class="agent-tabs"></div>
+    <textarea id="agentInjectionText" class="agent-injection-editor" spellcheck="false"
+      placeholder="只对当前学院、当前选中的最细分 agent 类型生效。例：张涛和尚晓朋的 addnews.jsp 是后台地址，不能当作个人主页；找不到公开主页时把主页URL置为空字符串。"></textarea>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <button id="saveAgentInjectionBtn" class="btn btn-primary" style="font-size:12px;padding:5px 12px">💾 保存提示</button>
+      <button id="clearAgentInjectionBtn" class="btn btn-secondary" style="font-size:12px;padding:5px 12px">清空当前 agent</button>
+      <span id="agentInjectionStatus" style="font-size:12px;color:#666"></span>
+    </div>
+  </div>
 </div>
 
 <div class="card">
@@ -1182,6 +1311,136 @@ function getModelShortName(fullId) {
   return parts[parts.length - 1] || fullId;
 }
 
+// ── Agent 临时纠偏提示 ──
+
+let agentInjectionTypes = [];
+let agentInjectionProjectId = null;
+let currentAgentInjectionType = null;
+let agentInjectionSaveTimer = null;
+let agentInjectionDirty = false;
+let agentInjectionLoadSeq = 0;
+
+async function initAgentPromptInjections(preferredType) {
+  const seq = ++agentInjectionLoadSeq;
+  const loading = document.getElementById('agentInjectionLoading');
+  const content = document.getElementById('agentInjectionContent');
+  const project = document.getElementById('agentInjectionProject');
+  const editor = document.getElementById('agentInjectionText');
+  loading.textContent = '加载中...';
+  loading.style.display = 'block';
+  content.style.display = 'none';
+  project.textContent = '';
+  editor.value = '';
+  agentInjectionTypes = [];
+  agentInjectionProjectId = null;
+  agentInjectionDirty = false;
+  const r = await api('/api/agent-prompt-injections');
+  if (seq !== agentInjectionLoadSeq) return;
+  if (!r.project_id) {
+    loading.textContent = '暂无激活学院';
+    content.style.display = 'none';
+    return;
+  }
+  agentInjectionProjectId = r.project_id;
+  agentInjectionTypes = r.types || [];
+  project.textContent = '当前学院: ' + r.project_id;
+  loading.style.display = 'none';
+  content.style.display = 'block';
+  const nextType = preferredType && agentInjectionTypes.some(x => x.key === preferredType)
+    ? preferredType
+    : (currentAgentInjectionType && agentInjectionTypes.some(x => x.key === currentAgentInjectionType)
+      ? currentAgentInjectionType
+      : (agentInjectionTypes[2]?.key || agentInjectionTypes[0]?.key));
+  renderAgentInjectionTabs(nextType);
+  selectAgentInjectionType(nextType, false);
+}
+
+function renderAgentInjectionTabs(activeType) {
+  const tabs = document.getElementById('agentInjectionTabs');
+  tabs.textContent = '';
+  for (const item of agentInjectionTypes) {
+    const tab = document.createElement('button');
+    tab.className = 'btn btn-secondary agent-tab'
+      + (item.key === activeType ? ' agent-tab-active' : '')
+      + (item.enabled ? ' agent-tab-enabled' : '');
+    tab.textContent = item.label;
+    tab.onclick = async () => {
+      await flushAgentPromptInjectionSave();
+      selectAgentInjectionType(item.key, true);
+    };
+    tabs.appendChild(tab);
+  }
+}
+
+function selectAgentInjectionType(agentType, rerenderTabs) {
+  currentAgentInjectionType = agentType;
+  const item = agentInjectionTypes.find(x => x.key === agentType) || {};
+  const editor = document.getElementById('agentInjectionText');
+  editor.value = item.content || '';
+  agentInjectionDirty = false;
+  document.getElementById('agentInjectionStatus').textContent = item.enabled ? '已保存并启用' : '空提示，不会注入';
+  if (rerenderTabs) renderAgentInjectionTabs(agentType);
+}
+
+function scheduleAgentPromptInjectionSave() {
+  agentInjectionDirty = true;
+  document.getElementById('agentInjectionStatus').textContent = '编辑中，稍后自动保存...';
+  if (agentInjectionSaveTimer) clearTimeout(agentInjectionSaveTimer);
+  agentInjectionSaveTimer = setTimeout(saveCurrentAgentPromptInjection, 700);
+}
+
+async function flushAgentPromptInjectionSave() {
+  if (agentInjectionSaveTimer) {
+    clearTimeout(agentInjectionSaveTimer);
+    agentInjectionSaveTimer = null;
+  }
+  if (agentInjectionDirty) {
+    await saveCurrentAgentPromptInjection();
+  }
+}
+
+async function saveCurrentAgentPromptInjection() {
+  if (!currentAgentInjectionType || !agentInjectionProjectId) return;
+  agentInjectionSaveTimer = null;
+  const editor = document.getElementById('agentInjectionText');
+  const status = document.getElementById('agentInjectionStatus');
+  const projectId = agentInjectionProjectId;
+  const agentType = currentAgentInjectionType;
+  const text = editor.value;
+  status.textContent = '保存中...';
+  const r = await api('/api/agent-prompt-injection', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      project_id: projectId,
+      agent_type: agentType,
+      content: text,
+    }),
+  });
+  if (r.error) {
+    status.textContent = '保存失败: ' + r.error;
+    return;
+  }
+  if (projectId !== agentInjectionProjectId || agentType !== currentAgentInjectionType) {
+    return;
+  }
+  agentInjectionDirty = false;
+  const item = agentInjectionTypes.find(x => x.key === agentType);
+  if (item) {
+    item.content = text;
+    item.enabled = !!text.trim();
+  }
+  renderAgentInjectionTabs(agentType);
+  status.textContent = text.trim() ? '已保存并启用' : '已清空，不会注入';
+}
+
+async function clearCurrentAgentPromptInjection() {
+  const editor = document.getElementById('agentInjectionText');
+  editor.value = '';
+  agentInjectionDirty = true;
+  await saveCurrentAgentPromptInjection();
+}
+
 // ── 文件编辑 ──
 
 let fileEditorData = {}; // key -> {content, syntax}
@@ -1208,6 +1467,8 @@ async function refreshProjectSelector() {
   const active = projects.find(p => p.project_id === sel.value) || projects[0];
   meta.textContent = active ? ('导师 ' + (active.tutor_count || 0) + ' 位') : '';
   sel.onchange = async () => {
+    const previousAgentType = currentAgentInjectionType;
+    await flushAgentPromptInjectionSave();
     const result = await api('/api/active-project', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -1222,6 +1483,7 @@ async function refreshProjectSelector() {
     await refreshResults();
     await refreshEvalProgress();
     await initFileEditor();
+    await initAgentPromptInjections(previousAgentType);
   };
 }
 
@@ -1585,11 +1847,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('evalStartBtn').addEventListener('click', startEval);
   document.getElementById('evalPauseBtn').addEventListener('click', pauseEval);
   document.getElementById('evalResumeBtn').addEventListener('click', resumeEval);
+  document.getElementById('agentInjectionText').addEventListener('input', scheduleAgentPromptInjectionSave);
+  document.getElementById('saveAgentInjectionBtn').addEventListener('click', saveCurrentAgentPromptInjection);
+  document.getElementById('clearAgentInjectionBtn').addEventListener('click', clearCurrentAgentPromptInjection);
+  window.addEventListener('beforeunload', () => {
+    if (agentInjectionDirty && agentInjectionProjectId && currentAgentInjectionType) {
+      const body = JSON.stringify({
+        project_id: agentInjectionProjectId,
+        agent_type: currentAgentInjectionType,
+        content: document.getElementById('agentInjectionText').value,
+      });
+      navigator.sendBeacon('/api/agent-prompt-injection', new Blob([body], {type: 'application/json'}));
+    }
+  });
   await refreshProjectSelector();
   await refreshStatus();
   await refreshTokens();
   await refreshResults();
   await initFileEditor();
+  await initAgentPromptInjections();
   await initStepModelSelects();
   // Eval 进度轮询
   await refreshEvalProgress();
