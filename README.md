@@ -19,6 +19,46 @@ cp .env.example .env
 python3 init_project.py
 ```
 
+## Windows 启动指南
+
+推荐使用 PowerShell，在工程根目录执行：
+
+```powershell
+cd <repo>
+py -3 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+Copy-Item .env.example .env
+python init_project.py
+```
+
+如果 PowerShell 默认禁止执行脚本，可以先运行一次：
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+补充说明：
+
+- Windows 下虚拟环境激活脚本路径是 `.venv\Scripts\Activate.ps1`，不是 `source .venv/bin/activate`
+- 复制环境变量模板时用 `Copy-Item`，不是 `cp`
+- 如果你不想激活虚拟环境，也可以直接使用 `.venv\Scripts\python.exe`
+- Web UI 启动命令：
+
+```powershell
+.venv\Scripts\python.exe workflow\webui.py
+```
+
+- workflow 常用命令：
+
+```powershell
+.venv\Scripts\python.exe -m workflow status
+.venv\Scripts\python.exe -m workflow build-profile
+.venv\Scripts\python.exe -m workflow init-school
+.venv\Scripts\python.exe -m workflow full --parallel 1
+```
+
 ## 敏感信息配置
 
 敏感信息不要再直接写进 YAML 或代码。统一放在工程根目录：

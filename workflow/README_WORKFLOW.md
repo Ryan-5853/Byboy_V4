@@ -24,10 +24,32 @@ cd <repo>
 .venv/bin/python -m workflow report
 ```
 
+Windows PowerShell 等价写法：
+
+```powershell
+cd <repo>
+.venv\Scripts\python.exe -m workflow status
+.venv\Scripts\python.exe -m workflow build-profile
+.venv\Scripts\python.exe -m workflow init-school
+.venv\Scripts\python.exe -m workflow explore
+.venv\Scripts\python.exe -m workflow condense-pattern
+.venv\Scripts\python.exe -m workflow gen-prompts
+.venv\Scripts\python.exe -m workflow test workspace\<project>\prompts\prompt_1_xxx.md
+.venv\Scripts\python.exe -m workflow batch 1 10 --parallel 1
+.venv\Scripts\python.exe -m workflow full --parallel 1
+.venv\Scripts\python.exe -m workflow report
+```
+
 也可以直接执行：
 
 ```bash
 .venv/bin/python workflow/orchestrator.py status
+```
+
+Windows：
+
+```powershell
+.venv\Scripts\python.exe workflow\orchestrator.py status
 ```
 
 Web UI 入口也已迁移，页面和原接口保持一致，后端任务改为调用 Python orchestrator：
@@ -37,6 +59,13 @@ cd <repo>
 .venv/bin/python workflow/webui.py
 ```
 
+Windows：
+
+```powershell
+cd <repo>
+.venv\Scripts\python.exe workflow\webui.py
+```
+
 默认地址：
 
 ```text
@@ -44,6 +73,13 @@ http://localhost:8897
 ```
 
 可用 `WEBUI_PORT=8898` 改端口。
+
+Windows PowerShell 改端口示例：
+
+```powershell
+$env:WEBUI_PORT = "8898"
+.venv\Scripts\python.exe workflow\webui.py
+```
 
 ## 项目选择与激活学院
 
