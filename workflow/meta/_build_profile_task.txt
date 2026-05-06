@@ -1,20 +1,203 @@
 ## 任务：构建个人档案
 
-你现在在 workflow 项目目录下。查找 workflow/User/ 目录读取文件。
+你现在在工程根目录下。查找 `workflow/User/` 目录读取用户文件。
 
-### 当前框架可用工具名
+### 工具总则
 
-- `filesystem_list_files(path=".", glob="**/*")`：列出工作区文件。
-- `filesystem_read_file(path)`：读取工作区文本文件。
-- `filesystem_write_file(path, content)`：写入工作区文本文件。
-- `filesystem_search_text(query, path=".", glob="**/*")`：搜索工作区文本。
-- `data_parse_json(text)`：解析 JSON 字符串。
-- `web_fetch_url(url)`：GET 获取网页文本。
-- `web_extract_links(url)`：提取网页链接。
-- `web_post_url(url, data=None, headers=None)`：POST 获取网页文本。
-- `web_search(query)`：搜索网页。
+1. 先选最小必要工具，不要一次调用过多工具。
+2. 先本地读写，再联网抓取；先文本抓取，再浏览器渲染。
+3. 每次调用前明确目标字段，避免“先抓一大堆再筛”。
+4. 如返回 `TOOL_ERROR ...`，只修正本任务的参数后重试，不要切换阶段。
+5. 同一路径连续 2 次“无新增信息”（空返回、同样错误、同样片段）时，不要继续同参重放；必须换途径。
+6. 如果已确认目标站点处于统一挑战页/反爬拦截状态，立即收敛并输出失败留痕，不要继续扩展到缓存站、镜像站、Wayback、无关搜索。
 
-所有本地路径都相对于 workflow 工作区；写文件必须写入提示词指定的路径。
+### 文件系统工具（工程根内）
+
+- `filesystem_list_files(path=".", glob="**/*")`
+  用途：列出目录下文件，定位输入/输出文件。
+  关键参数：`path` 目录，`glob` 过滤模式。
+  返回：路径字符串列表。
+
+- `filesystem_read_file(path)`
+  用途：读取单个文本文件。
+  关键参数：`path` 相对工作区路径。
+  返回：文件文本。
+
+- `filesystem_read_many(paths)`
+  用途：一次读取多个小文件，做对比/汇总。
+  关键参数：`paths` 路径数组。
+  返回：对象数组，包含 `path`、`content`、`truncated`。
+
+- `filesystem_file_info(path, include_hash=False)`
+  用途：查看文件元信息（大小、时间、是否存在）。
+  关键参数：`include_hash=True` 时会计算 hash（更慢）。
+  返回：文件信息对象。
+
+- `filesystem_search_text(query, path=".", glob="**/*")`
+  用途：在本地文件中查关键字。
+  关键参数：`query`、`path`、`glob`。
+  返回：命中片段数组（含文件路径和行信息）。
+
+- `filesystem_write_file(path, content)`
+  用途：写入/覆盖文本文件（常用于最终产物）。
+  关键参数：`path`、`content`。
+  返回：写入结果（路径、字符数）。
+
+- `filesystem_append_file(path, content, newline=True)`
+  用途：向日志类文件追加内容。
+  关键参数：`newline` 控制是否补换行。
+  返回：追加结果。
+
+### 数据工具
+
+- `data_parse_json(text)`
+  用途：严格解析 JSON 字符串。
+  返回：JSON 对象/数组；非法 JSON 会报错。
+
+- `data_extract_json(text, mode="first")`
+  用途：从混杂文本中提取 JSON 片段。
+  场景：页面文本里夹杂 JSON、模型返回含解释文字。
+  返回：提取出的 JSON（按 `mode`）。
+
+- `data_render_template(template, values, safe=True)`
+  用途：简单模板渲染，批量生成结构化文本。
+  返回：渲染后的字符串。
+
+### Web 文本抓取工具（优先使用）
+
+- `web_fetch_url(url)`
+  用途：GET 网页并返回清洗后的可读文本。
+  场景：静态页面正文抓取、快速读取公告/列表。
+  返回：文本字符串。
+
+- `web_extract_links(url)`
+  用途：提取页面中的链接 URL。
+  场景：先找“教师名录/师资队伍/下一页/各系入口”。
+  返回：链接数组。
+
+- `web_post_url(url, data=None, headers=None)`
+  用途：POST 请求抓取页面或接口返回文本。
+  场景：站点用表单提交或 POST API 获取内容。
+  返回：文本字符串。
+  失败诊断：
+  - 若返回空字符串或 `sql error`，优先判断参数编码/会话上下文问题；
+  - 连续 2 次无新增后，改用 `browser_capture_requests` 或 `browser_render_page` 抽取可用信息，不要原样重试。
+
+- `web_fetch_json(url)`
+  用途：GET 并解析 JSON 接口。
+  场景：站点前端走 JSON API 时直接取结构化数据。
+  返回：JSON 对象/数组。
+
+- `web_search(query)`
+  用途：外部搜索入口页面。
+  场景：找官网、找学院名录入口、找备用网址。
+  返回：结果数组（`title`、`url`、`snippet`）。
+
+- `web_download_file(url, path)`
+  用途：下载文件到 workspace。
+  场景：下载 PDF/附件后再做后处理。
+  返回：下载结果（写入字节数等）。
+
+### 浏览器渲染工具（动态页面/JS 页面时使用）
+
+- `browser_render_page(url, wait_until="domcontentloaded", wait_for_selector=None)`
+  用途：用真实浏览器渲染页面，返回 `title`、`text`、`html`、`links`。
+  场景：`web_fetch_url` 抓不到正文、页面依赖 JS 渲染。
+  参数建议：
+  - 首选 `wait_until="domcontentloaded"`；
+  - 仅在必要时用 `networkidle`；
+  - 知道关键节点时再加 `wait_for_selector`。
+  返回：结构化对象（含 `final_url`、`status`、`wait_until`）。
+
+- `browser_capture_requests(url, wait_until="domcontentloaded", wait_for_selector=None)`
+  用途：渲染页面同时抓取网络请求（重点是 `xhr` / `fetch` / `document`）。
+  场景：排查 SPA 动态加载路径，定位真实 API（如 `TeacherHome/teacherBody.do`）和请求方法。
+  返回：结构化对象，包含 `requests` 数组，每条含 `resource_type`、`method`、`url`、`status`、
+  `request_post_data`、`content_type` 等字段。
+  使用建议：
+  - 先用它识别“哪个请求返回核心内容”；
+  - 再用 `web_post_url` 或 `web_fetch_json` 复现关键请求；
+  - 若需要页面证据，可再配合 `browser_screenshot_page`。
+
+- `browser_capture_xhr(url, wait_until="domcontentloaded", wait_for_selector=None)`
+  用途：抓取 XHR/fetch，并生成可复用的 `session_id`（含 cookie/storage state）。
+  场景：接口需要会话上下文时，先抓包建立会话，再重放 API。
+  返回：包含 `session_id` 与 `requests` 列表。
+  使用建议：
+  - 对需要 cookie 的接口，优先走 `browser_capture_xhr`；
+  - 从 `requests` 里提取真实参数（如数字 `id` / `data-tid`）；
+  - 不要猜测 UUID 或用户名去硬试 API。
+
+- `browser_replay_api(session_id, url, method="GET", data=None, headers=None)`
+  用途：在 `browser_capture_xhr` 建立的同一会话中重放 API 请求。
+  场景：`web_post_url` 因会话缺失失败、或接口依赖前置页面状态。
+  返回：结构化对象（`status`、`ok`、`content_type`、`response_body`）。
+  使用建议：
+  - 先用抓包结果中的请求参数与 header 最小复现；
+  - 若返回业务失败（如 `sql error`），必须改参数来源或改路径，不能原样重试。
+
+- `browser_export_session(session_id, path)`
+  用途：把当前进程中的浏览器会话导出到 workspace JSON 文件。
+  场景：人工过盾后长期复用会话、跨任务复用。
+  返回：写入路径与字符数。
+
+- `browser_import_session(path)`
+  用途：从 workspace JSON 文件导入会话，得到新的 `session_id`。
+  场景：重启后恢复已保存的过盾会话。
+  返回：新的 `session_id`。
+
+- `browser_screenshot_page(url, path, wait_until="domcontentloaded", wait_for_selector=None, full_page=True)`
+  用途：渲染后截图，写入 workspace 文件。
+  场景：调试页面是否正确打开、记录证据。
+  返回：截图结果（路径、字节数、状态码）。
+
+### 受限命令工具（诊断/转换）
+
+- `process_run_command(command)`
+  用途：在工作区内执行 allowlist 内的本地命令。
+  典型场景：
+  - 网页诊断：`curl` 抓原始 HTML，配合 `grep/head/sed` 抽样查看脚本与关键片段；
+  - 文档转换：`pdftotext`、`pandoc` 处理简历或附件文本。
+  关键限制：
+  - `command` 不是 shell；它会按参数拆分执行；
+  - 只能执行允许的命令名；
+  - 不支持 shell 管道、重定向、变量替换、here-doc、命令替换等复杂 shell 行为；
+  - **禁止**写 `|`、`>`, `>>`, `<`, `2>&1`, `&&`, `||`, `;`；
+  - 如果你想“先 curl 再 head/grep/sed”，必须拆成多次工具调用，不能写成一条 shell 命令；
+  - 超时和输出长度受配置限制。
+  返回：结构化对象（`returncode`、`stdout`、`stderr`）。
+
+### 反爬/挑战页快速识别
+
+如果出现以下任意组合，视为“站点被统一挑战页拦截”：
+
+- `web_fetch_url` 返回几乎空白的 HTML，但包含长混淆 JS、`$_ts`、动态 challenge 脚本等特征；
+- `browser_render_page` 连续 2 次返回 `status=202` 且 `title/text/html` 基本为空；
+- 根路径和目标路径都只返回相同模式的挑战页；
+- `browser_capture_requests` 没有抓到可直接复现的业务接口，只看到 challenge 资源。
+
+一旦确认上述状态：
+
+1. 不要继续微调同一路径参数；
+2. 不要继续尝试 Wayback、缓存页、泛搜索、无关镜像；
+3. 立即写失败留痕，明确标注：
+   - `ANTI_BOT_CHALLENGE_BLOCKED`
+   - 已尝试的路径
+   - 关键证据（202 空白页 / challenge JS 特征 / 无业务接口）
+   - 建议下一步（人工浏览器取 cookie、换网络、人工导出名单）
+4. 当前任务若要求必须写产物文件，就写最小失败产物并结束。
+
+### 路径与错误处理
+
+- 所有本地路径相对于工程根目录。
+- 用户输入位于 `workflow/User/`，工作流配置位于 `workflow/config/`，元提示位于 `workflow/meta/`。
+- 项目输出文件必须写到 `workspace/` 前缀路径，例如
+  `workspace/学校_学院/tutors_data.json`。
+- 如果返回 `TOOL_ERROR ...`：
+  1) 先检查 URL、路径、参数名、等待策略；
+  2) 改参数后重试同一任务；
+  3) 若同一路径连续 2 次无新增信息，必须换工具路径（例如 `browser_capture_requests` → `browser_render_page`）；
+  4) 不要把错误当成新用户需求，不要切换阶段。
 
 
 请执行以下步骤：

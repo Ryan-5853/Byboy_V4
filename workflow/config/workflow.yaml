@@ -1,6 +1,6 @@
 default_model_alias: local-focused
 step_model_aliases:
-  build-profile: local-focused
+  build-profile: deepseekV4_flash
   init-school: deepseekV4_flash
   verify-school: local-focused
   explore: deepseekV4_flash

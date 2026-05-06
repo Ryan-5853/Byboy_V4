@@ -85,13 +85,15 @@ class RuntimeLogger:
         return self._log_file
 
     def _build_log_file_name(self, *, agent_type: str | None, task_name: str | None) -> Path:
-        day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         agent = self._slug(agent_type or "agent")
         task = self._slug(self._normalize_task_name(task_name or "task"))
+        target_dir = self._log_dir / day / agent
+        target_dir.mkdir(parents=True, exist_ok=True)
         prefix = f"{day}-{agent}-{task}-"
         pattern = re.compile(rf"^{re.escape(prefix)}(\d{{4}})\.jsonl$")
         max_seq = 0
-        for item in self._log_dir.iterdir():
+        for item in target_dir.iterdir():
             if not item.is_file():
                 continue
             m = pattern.match(item.name)
@@ -105,7 +107,7 @@ class RuntimeLogger:
                 max_seq = seq
         next_seq = max_seq + 1
         filename = f"{prefix}{next_seq:04d}.jsonl"
-        return self._log_dir / filename
+        return target_dir / filename
 
     def _slug(self, value: str) -> str:
         text = value.strip().lower()

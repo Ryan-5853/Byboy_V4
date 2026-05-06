@@ -15,11 +15,18 @@ ENV/
 env.bak/
 venv.bak/
 
-# Project configuration
-# workspace/
-# !tutor_select_v3/workspace/
-# tutor_select_v3/workspace/*
-# !tutor_select_v3/workspace/school_info.json
+# Runtime artifacts and logs
+logs/
+**/.runs/
+workflow/.audit/
+teacher_body_raw.html
+workspace/*
+!workspace/active_project.json
+!workspace/school_info.json
+
+workflow/User/*
+!workflow/User/README.md
+!workflow/User/tutor_favor.json
 
 # IDEs
 .vscode/

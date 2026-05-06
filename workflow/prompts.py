@@ -1,202 +1,49 @@
 from __future__ import annotations
 
 
-TOOL_GUIDE = """### 工具总则
+TOOL_GUIDE = """### 工具清单（名称 + 简接口）
 
-1. 先选最小必要工具，不要一次调用过多工具。
-2. 先本地读写，再联网抓取；先文本抓取，再浏览器渲染。
-3. 每次调用前明确目标字段，避免“先抓一大堆再筛”。
-4. 如返回 `TOOL_ERROR ...`，只修正本任务的参数后重试，不要切换阶段。
-5. 同一路径连续 2 次“无新增信息”（空返回、同样错误、同样片段）时，不要继续同参重放；必须换途径。
-6. 如果已确认目标站点处于统一挑战页/反爬拦截状态，立即收敛并输出失败留痕，不要继续扩展到缓存站、镜像站、Wayback、无关搜索。
+调用规则：
+- 先选最少工具完成当前子任务。
+- 若返回 `TOOL_ERROR ...`，根据报错改参数或换工具，不切换阶段。
 
-### 文件系统工具（工程根内）
-
+文件系统：
 - `filesystem_list_files(path=".", glob="**/*")`
-  用途：列出目录下文件，定位输入/输出文件。
-  关键参数：`path` 目录，`glob` 过滤模式。
-  返回：路径字符串列表。
-
 - `filesystem_read_file(path)`
-  用途：读取单个文本文件。
-  关键参数：`path` 相对工作区路径。
-  返回：文件文本。
-
 - `filesystem_read_many(paths)`
-  用途：一次读取多个小文件，做对比/汇总。
-  关键参数：`paths` 路径数组。
-  返回：对象数组，包含 `path`、`content`、`truncated`。
-
 - `filesystem_file_info(path, include_hash=False)`
-  用途：查看文件元信息（大小、时间、是否存在）。
-  关键参数：`include_hash=True` 时会计算 hash（更慢）。
-  返回：文件信息对象。
-
 - `filesystem_search_text(query, path=".", glob="**/*")`
-  用途：在本地文件中查关键字。
-  关键参数：`query`、`path`、`glob`。
-  返回：命中片段数组（含文件路径和行信息）。
-
 - `filesystem_write_file(path, content)`
-  用途：写入/覆盖文本文件（常用于最终产物）。
-  关键参数：`path`、`content`。
-  返回：写入结果（路径、字符数）。
-
 - `filesystem_append_file(path, content, newline=True)`
-  用途：向日志类文件追加内容。
-  关键参数：`newline` 控制是否补换行。
-  返回：追加结果。
 
-### 数据工具
-
+数据处理：
 - `data_parse_json(text)`
-  用途：严格解析 JSON 字符串。
-  返回：JSON 对象/数组；非法 JSON 会报错。
-
 - `data_extract_json(text, mode="first")`
-  用途：从混杂文本中提取 JSON 片段。
-  场景：页面文本里夹杂 JSON、模型返回含解释文字。
-  返回：提取出的 JSON（按 `mode`）。
-
 - `data_render_template(template, values, safe=True)`
-  用途：简单模板渲染，批量生成结构化文本。
-  返回：渲染后的字符串。
 
-### Web 文本抓取工具（优先使用）
-
+Web：
 - `web_fetch_url(url)`
-  用途：GET 网页并返回清洗后的可读文本。
-  场景：静态页面正文抓取、快速读取公告/列表。
-  返回：文本字符串。
-
 - `web_extract_links(url)`
-  用途：提取页面中的链接 URL。
-  场景：先找“教师名录/师资队伍/下一页/各系入口”。
-  返回：链接数组。
-
 - `web_post_url(url, data=None, headers=None)`
-  用途：POST 请求抓取页面或接口返回文本。
-  场景：站点用表单提交或 POST API 获取内容。
-  返回：文本字符串。
-  失败诊断：
-  - 若返回空字符串或 `sql error`，优先判断参数编码/会话上下文问题；
-  - 连续 2 次无新增后，改用 `browser_capture_requests` 或 `browser_render_page` 抽取可用信息，不要原样重试。
-
 - `web_fetch_json(url)`
-  用途：GET 并解析 JSON 接口。
-  场景：站点前端走 JSON API 时直接取结构化数据。
-  返回：JSON 对象/数组。
-
 - `web_search(query)`
-  用途：外部搜索入口页面。
-  场景：找官网、找学院名录入口、找备用网址。
-  返回：结果数组（`title`、`url`、`snippet`）。
-
 - `web_download_file(url, path)`
-  用途：下载文件到 workspace。
-  场景：下载 PDF/附件后再做后处理。
-  返回：下载结果（写入字节数等）。
 
-### 浏览器渲染工具（动态页面/JS 页面时使用）
-
+浏览器：
 - `browser_render_page(url, wait_until="domcontentloaded", wait_for_selector=None)`
-  用途：用真实浏览器渲染页面，返回 `title`、`text`、`html`、`links`。
-  场景：`web_fetch_url` 抓不到正文、页面依赖 JS 渲染。
-  参数建议：
-  - 首选 `wait_until="domcontentloaded"`；
-  - 仅在必要时用 `networkidle`；
-  - 知道关键节点时再加 `wait_for_selector`。
-  返回：结构化对象（含 `final_url`、`status`、`wait_until`）。
-
 - `browser_capture_requests(url, wait_until="domcontentloaded", wait_for_selector=None)`
-  用途：渲染页面同时抓取网络请求（重点是 `xhr` / `fetch` / `document`）。
-  场景：排查 SPA 动态加载路径，定位真实 API（如 `TeacherHome/teacherBody.do`）和请求方法。
-  返回：结构化对象，包含 `requests` 数组，每条含 `resource_type`、`method`、`url`、`status`、
-  `request_post_data`、`content_type` 等字段。
-  使用建议：
-  - 先用它识别“哪个请求返回核心内容”；
-  - 再用 `web_post_url` 或 `web_fetch_json` 复现关键请求；
-  - 若需要页面证据，可再配合 `browser_screenshot_page`。
-
 - `browser_capture_xhr(url, wait_until="domcontentloaded", wait_for_selector=None)`
-  用途：抓取 XHR/fetch，并生成可复用的 `session_id`（含 cookie/storage state）。
-  场景：接口需要会话上下文时，先抓包建立会话，再重放 API。
-  返回：包含 `session_id` 与 `requests` 列表。
-  使用建议：
-  - 对需要 cookie 的接口，优先走 `browser_capture_xhr`；
-  - 从 `requests` 里提取真实参数（如数字 `id` / `data-tid`）；
-  - 不要猜测 UUID 或用户名去硬试 API。
-
 - `browser_replay_api(session_id, url, method="GET", data=None, headers=None)`
-  用途：在 `browser_capture_xhr` 建立的同一会话中重放 API 请求。
-  场景：`web_post_url` 因会话缺失失败、或接口依赖前置页面状态。
-  返回：结构化对象（`status`、`ok`、`content_type`、`response_body`）。
-  使用建议：
-  - 先用抓包结果中的请求参数与 header 最小复现；
-  - 若返回业务失败（如 `sql error`），必须改参数来源或改路径，不能原样重试。
-
 - `browser_export_session(session_id, path)`
-  用途：把当前进程中的浏览器会话导出到 workspace JSON 文件。
-  场景：人工过盾后长期复用会话、跨任务复用。
-  返回：写入路径与字符数。
-
 - `browser_import_session(path)`
-  用途：从 workspace JSON 文件导入会话，得到新的 `session_id`。
-  场景：重启后恢复已保存的过盾会话。
-  返回：新的 `session_id`。
-
 - `browser_screenshot_page(url, path, wait_until="domcontentloaded", wait_for_selector=None, full_page=True)`
-  用途：渲染后截图，写入 workspace 文件。
-  场景：调试页面是否正确打开、记录证据。
-  返回：截图结果（路径、字节数、状态码）。
 
-### 受限命令工具（诊断/转换）
-
+命令工具：
 - `process_run_command(command)`
-  用途：在工作区内执行 allowlist 内的本地命令。
-  典型场景：
-  - 网页诊断：`curl` 抓原始 HTML，配合 `grep/head/sed` 抽样查看脚本与关键片段；
-  - 文档转换：`pdftotext`、`pandoc` 处理简历或附件文本。
-  关键限制：
-  - `command` 不是 shell；它会按参数拆分执行；
-  - 只能执行允许的命令名；
-  - 不支持 shell 管道、重定向、变量替换、here-doc、命令替换等复杂 shell 行为；
-  - **禁止**写 `|`、`>`, `>>`, `<`, `2>&1`, `&&`, `||`, `;`；
-  - 如果你想“先 curl 再 head/grep/sed”，必须拆成多次工具调用，不能写成一条 shell 命令；
-  - 超时和输出长度受配置限制。
-  返回：结构化对象（`returncode`、`stdout`、`stderr`）。
 
-### 反爬/挑战页快速识别
-
-如果出现以下任意组合，视为“站点被统一挑战页拦截”：
-
-- `web_fetch_url` 返回几乎空白的 HTML，但包含长混淆 JS、`$_ts`、动态 challenge 脚本等特征；
-- `browser_render_page` 连续 2 次返回 `status=202` 且 `title/text/html` 基本为空；
-- 根路径和目标路径都只返回相同模式的挑战页；
-- `browser_capture_requests` 没有抓到可直接复现的业务接口，只看到 challenge 资源。
-
-一旦确认上述状态：
-
-1. 不要继续微调同一路径参数；
-2. 不要继续尝试 Wayback、缓存页、泛搜索、无关镜像；
-3. 立即写失败留痕，明确标注：
-   - `ANTI_BOT_CHALLENGE_BLOCKED`
-   - 已尝试的路径
-   - 关键证据（202 空白页 / challenge JS 特征 / 无业务接口）
-   - 建议下一步（人工浏览器取 cookie、换网络、人工导出名单）
-4. 当前任务若要求必须写产物文件，就写最小失败产物并结束。
-
-### 路径与错误处理
-
-- 所有本地路径相对于工程根目录。
-- 用户输入位于 `workflow/User/`，工作流配置位于 `workflow/config/`，元提示位于 `workflow/meta/`。
-- 项目输出文件必须写到 `workspace/` 前缀路径，例如
-  `workspace/学校_学院/tutors_data.json`。
-- 如果返回 `TOOL_ERROR ...`：
-  1) 先检查 URL、路径、参数名、等待策略；
-  2) 改参数后重试同一任务；
-  3) 若同一路径连续 2 次无新增信息，必须换工具路径（例如 `browser_capture_requests` → `browser_render_page`）；
-  4) 不要把错误当成新用户需求，不要切换阶段。
+路径约定：
+- 本地路径相对工程根目录。
+- 输出文件写到 `workspace/...` 路径。
 """
 
 
@@ -368,6 +215,8 @@ def init_school_extract_prompt(
 ```
 
 **JSON 只包含 `导师姓名` 和 `主页URL` 两个字段，不要添加其他字段。**
+如果某位导师无公开主页，`主页URL` 允许为空字符串 `""`，不要丢弃该导师。
+如果出现同名导师，必须都保留，禁止去重。
 
 #### 第五步：写入访问日志（可选但推荐）
 
@@ -394,6 +243,8 @@ def init_school_extract_prompt(
 ### 要求
 - 只提取 {academy_name} 的导师，不要扩大到其他学院
 - 尽可能找全所有导师
+- 出现同名导师时全部保留，不要误去重
+- 出现无主页导师时也要保留，`主页URL` 可为空字符串
 - 如果页面 JS 动态加载导致 `web_fetch_url` 获取不到列表，用 `web_extract_links`、`web_post_url` 或 `web_search` 尝试替代来源
 - 如果已确认统一挑战页/反爬拦截，停止继续搜索和猜路径，写失败留痕后结束
 - 确认 `{tutors_file}` 写入成功后回复"名单已生成"
@@ -429,9 +280,12 @@ def init_school_verify_prompt(
 - **名称错误**：导师姓名是否准确（没有错别字、同音字、多字少字）？
 - **URL 合理性**：主页URL是否指向每个人的个人主页（而不是学院首页或空链接）？
 - **跨院系**：是否有其他学院的导师混入？
+- **同名与无主页处理**：同名导师可能真实存在；无主页URL也可能真实存在，不能仅据此判 FAIL。
 
 #### 校验策略
 - 先读一次 `{tutors_file}`，先做本地检查：JSON 是否是数组、字段是否齐全、URL 域名和格式是否明显异常。
+- 对空 `主页URL`：仅记录“可能无主页”，不要直接作为格式错误。
+- 对同名：结合 URL/所属页面判断是否可能为不同人，不要机械判重。
 - 再做**有限外部抽查**：优先访问学院官网师资入口页，再抽查少量关键页面确认是否存在明显遗漏或明显错链。
 - **不要**为了“完全证明”而无休止搜索；拿到足够证据后立即输出结论。
 - 如果已经发现明确 FAIL 证据，就直接输出 `VERIFY_FAIL`，不要继续扩展搜索。
@@ -459,6 +313,57 @@ VERIFY_FAIL
 - 如果无法完全确认，也给出 PASS，备注"无法完全确认"及原因
 - 判断重点是**明显遗漏**（如某系完全缺失）和**明显错误**（如URL全是学院首页）
 - 输出结论后立刻停止，不要继续思考后续修复方案，不要继续搜索更多页面
+"""
+
+
+def init_school_repair_prompt(
+    *,
+    school_name: str,
+    academy_name: str,
+    homepage_url: str,
+    tutors_file: str,
+    verify_feedback: str,
+) -> str:
+    url_desc = homepage_url or "（无URL，请先搜索学院官网）"
+    return f"""## 任务：修复导师名单
+
+目标院校：**{school_name} {academy_name}**
+目标主页：{url_desc}
+导师名单文件：`{tutors_file}`
+
+{TOOL_GUIDE}
+
+### 输入
+
+- 原始导师名单文件：`{tutors_file}`
+- 校验失败原因（原文）：
+
+```text
+{verify_feedback}
+```
+
+### 你的目标
+
+在不改变任务边界的前提下修复名单，并覆盖写回 `{tutors_file}`。
+
+### 修复规则
+
+1. 只保留两个字段：`导师姓名`、`主页URL`。
+2. 同名导师允许存在，禁止因同名直接删除。
+3. 无主页导师允许存在，`主页URL` 可为空字符串 `""`。
+4. 仅删除明显坏数据：
+   - 非对象项
+   - 姓名为空
+   - URL 非空但明显不是 URL（不以 http/https 开头）
+5. 如能从学院页面补回明显缺失项，可补；不能确认时不要编造。
+
+### 输出要求
+
+- 修复成功并写回后，只回复：
+`REPAIR_SUCCESS`
+- 如果无法修复到可用状态，只回复：
+`REPAIR_FAIL`
+- 不要输出额外解释文字。
 """
 
 
@@ -726,10 +631,32 @@ def tutor_eval_prompt(
 - 如果某个 tool 调用失败或被拦截，请根据错误信息修改参数后重试，或改用其他工具路径完成同一任务。
 - 不要把 tool 错误当成新的用户需求，不要切换工作流阶段。
 
+### 主页有效性验证（必须先执行）
+
+给定主页 URL 可能是错误、失效或导师未开通主页。你必须先验证它是否有效。
+
+执行规则（严格）：
+1. 先访问给定 `主页URL`（`web_fetch_url` 或 `browser_render_page`）。
+2. 若失败，仅允许最多 2 次有限修正尝试（例如：
+   - `http`/`https` 切换；
+   - 去掉或补上 `?lang=zh`；
+   - 同域名下同一路径轻微规范化）。
+3. **禁止**扩展到广泛搜索、禁止到处猜测新主页、禁止跨域找“可能的个人主页”。
+3.1 **禁止**回到学院教师名录/研究生导师总表进行“反查主页”。
+3.2 **禁止**通过遍历学院栏目链接去碰运气寻找导师个人页。
+4. 超过 2 次仍无法拿到有效主页内容，立即判定“主页无效”，直接结束当前任务。
+
+当判定“主页无效”时：
+- 仍然按照规定输出格式写入 `__OUTPUT_FILE__`；
+- 分数字段可填 0；
+- `优先级` 填 `D`；
+- 在 `本轮初筛说明` 与 `信息留痕` 明确写“给定主页无效，按规则终止，不再扩展搜索”；
+- 写完后仅回复“评分已完成”。
+
 ### 页面访问策略
 
-以下是经过测试的导师主页访问策略，请严格按此执行。
-如果你发现此策略失效（如页面结构变化、URL 格式不对等），
+以下是经过测试的导师主页访问策略，请参照执行。
+如果你发现此策略失效（如页面结构变化、URL 格式不对等），考虑当前导师主页是否无效。
 可以自由使用当前框架允许的网页工具尝试获取信息。
 
 {access_strategy}
@@ -774,6 +701,7 @@ def tutor_eval_prompt(
 
 - 研究方向摘要要完整（包括研究领域、项目类型、学生成果等）
 - 每项评分都要有信息依据，记录在"信息留痕"字段中
+- 如果主页无效，按“主页无效”分支直接收敛，不要继续尝试更多路径
 - 如果页面信息不足，相关维度填低分并注明原因
 - 优先级阈值和评分维度见上方"导师选择偏好"中的定义
 - 扣分特征中的"一票否决"项应直接归入 D 档

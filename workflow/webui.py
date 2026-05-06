@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 import queue
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 import yaml
@@ -29,11 +29,13 @@ PORT = int(os.environ.get("WEBUI_PORT", "8897"))
 
 # 后台任务状态
 _running_tasks = {}  # task_id -> {thread, cmd, label, lines, exit_code, done}
+_tasks_lock = threading.Lock()
 _current_task_id = None  # 当前最后一个启动的任务 ID
 _eval_task_active = False  # eval 任务是否在运行中
 MAX_TASK_LINES = 2000
 STATUS_TAIL_LINES = 300
 HEARTBEAT_INTERVAL_SECONDS = 15
+MAX_TASK_HISTORY = 120
 WORKFLOW = TutorSelectWorkflow(PROJECT_ROOT)
 
 
@@ -94,15 +96,16 @@ def set_active_project(project_id):
 def background_runner(task_id, argv, label):
     """在后台线程执行命令，逐行捕获输出"""
     global _eval_task_active
-    _running_tasks[task_id] = {
-        "cmd": label,
-        "lines": [],
-        "line_count": 0,
-        "error_lines": [],
-        "exit_code": None,
-        "done": False,
-        "started_at": time.time(),
-    }
+    with _tasks_lock:
+        _running_tasks[task_id] = {
+            "cmd": label,
+            "lines": [],
+            "line_count": 0,
+            "error_lines": [],
+            "exit_code": None,
+            "done": False,
+            "started_at": time.time(),
+        }
     try:
         task_env = {
             **os.environ,
@@ -180,12 +183,16 @@ def background_runner(task_id, argv, label):
             if not had_data:
                 now = time.time()
                 if now - last_heartbeat > HEARTBEAT_INTERVAL_SECONDS:
-                    elapsed = int(now - _running_tasks[task_id].get("started_at", now))
+                    with _tasks_lock:
+                        started_at = _running_tasks.get(task_id, {}).get("started_at", now)
+                    elapsed = int(now - started_at)
                     _append_task_line(task_id, f"[⏳ 推理中... {elapsed}s]")
                     last_heartbeat = now
                 time.sleep(0.2)
 
-        _running_tasks[task_id]["exit_code"] = proc.returncode
+        with _tasks_lock:
+            if task_id in _running_tasks:
+                _running_tasks[task_id]["exit_code"] = proc.returncode
         # 只在当前 task 是自己时清空 _eval_task_active（防止被恢复的旧 task 覆盖）
         if _eval_task_active and ("全量分析" in label or "恢复" in label):
             # 检查有没有新任务已经启动
@@ -194,25 +201,30 @@ def background_runner(task_id, argv, label):
                 _eval_task_active = False
     except Exception as e:
         _append_task_line(task_id, f"ERROR: {type(e).__name__}: {e}", stream_name="stderr")
-        _running_tasks[task_id]["exit_code"] = -1
+        with _tasks_lock:
+            if task_id in _running_tasks:
+                _running_tasks[task_id]["exit_code"] = -1
     finally:
-        _running_tasks[task_id]["done"] = True
+        with _tasks_lock:
+            if task_id in _running_tasks:
+                _running_tasks[task_id]["done"] = True
 
 
 def _append_task_line(task_id, line, stream_name="stdout"):
-    task = _running_tasks.get(task_id)
-    if not task:
-        return
-    text = str(line)
-    if stream_name == "stderr" and text:
-        text = "[stderr] " + text
-    task["line_count"] = task.get("line_count", 0) + 1
-    task["lines"].append(text)
-    if _looks_like_error_line(text):
-        task.setdefault("error_lines", []).append(text)
-        task["error_lines"] = task["error_lines"][-80:]
-    if len(task["lines"]) > MAX_TASK_LINES:
-        task["lines"] = task["lines"][-MAX_TASK_LINES:]
+    with _tasks_lock:
+        task = _running_tasks.get(task_id)
+        if not task:
+            return
+        text = str(line)
+        if stream_name == "stderr" and text:
+            text = "[stderr] " + text
+        task["line_count"] = task.get("line_count", 0) + 1
+        task["lines"].append(text)
+        if _looks_like_error_line(text):
+            task.setdefault("error_lines", []).append(text)
+            task["error_lines"] = task["error_lines"][-80:]
+        if len(task["lines"]) > MAX_TASK_LINES:
+            task["lines"] = task["lines"][-MAX_TASK_LINES:]
 
 
 def _looks_like_error_line(line):
@@ -251,12 +263,14 @@ def start_task(cmd, label):
         "status": [py, "-m", "workflow", "--per-step-model", "status"],
     }
     if cmd not in known:
-        _running_tasks[task_id] = {"cmd": cmd, "lines": ["未知命令"], "exit_code": -1, "done": True}
+        with _tasks_lock:
+            _running_tasks[task_id] = {"cmd": cmd, "lines": ["未知命令"], "exit_code": -1, "done": True}
         return task_id
 
     if cmd == "full":
         global _eval_task_active
         _eval_task_active = True
+    _prune_task_history()
     t = threading.Thread(target=background_runner, args=(task_id, known[cmd], label), daemon=True)
     t.start()
     return task_id
@@ -264,7 +278,17 @@ def start_task(cmd, label):
 
 def get_task_status(task_id):
     """返回任务状态"""
-    t = _running_tasks.get(task_id)
+    with _tasks_lock:
+        t = _running_tasks.get(task_id)
+        if t:
+            t = {
+                "done": t.get("done"),
+                "exit_code": t.get("exit_code"),
+                "cmd": t.get("cmd"),
+                "lines": list(t.get("lines", [])),
+                "line_count": t.get("line_count"),
+                "error_lines": list(t.get("error_lines", [])),
+            }
     if not t:
         return {"done": True, "exit_code": -1, "lines": ["任务未找到"]}
     lines = t["lines"][-STATUS_TAIL_LINES:]
@@ -279,6 +303,22 @@ def get_task_status(task_id):
         "tail_start": tail_start,
         "error_lines": t.get("error_lines", [])[-40:],
     }
+
+
+def _prune_task_history():
+    """保留有限任务历史，避免长期运行后内存与轮询开销持续增大。"""
+    with _tasks_lock:
+        if len(_running_tasks) <= MAX_TASK_HISTORY:
+            return
+        done_items = [
+            (task_id, task)
+            for task_id, task in _running_tasks.items()
+            if task.get("done")
+        ]
+        done_items.sort(key=lambda x: x[1].get("started_at", 0))
+        removable = len(_running_tasks) - MAX_TASK_HISTORY
+        for task_id, _ in done_items[:max(0, removable)]:
+            _running_tasks.pop(task_id, None)
 
 
 # ── 状态 / 工具函数 ──
@@ -358,7 +398,9 @@ def get_token_summary():
     # aggregate usage from completed task lines when present.
     total_inp, total_out, total_tok = 0, 0, 0
     token_re = re.compile(r"[\"']?(input|output|total)_tokens[\"']?:\s*(\d+)")
-    for task in _running_tasks.values():
+    with _tasks_lock:
+        tasks_snapshot = list(_running_tasks.values())[-40:]
+    for task in tasks_snapshot:
         for line in task.get("lines", []):
             for key, value in token_re.findall(line):
                 amount = int(value)
@@ -372,7 +414,7 @@ def get_token_summary():
         "input": total_inp,
         "output": total_out,
         "total": total_tok or total_inp + total_out,
-        "sessions": len(_running_tasks),
+        "sessions": len(tasks_snapshot),
     }
 
 # ── 模型选择 ──
@@ -1512,7 +1554,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 
 def main():
-    server = HTTPServer((HOST, PORT), Handler)
+    server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"\n  🌐 导师筛选系统 Web UI")
     print(f"  ┌───────────────────────────────────┐")
     print(f"  │  地址: http://localhost:{PORT}        │")

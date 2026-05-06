@@ -40,6 +40,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "build-profile": "local-default",
         "init-school": "local-default",
         "verify-school": "local-default",
+        "repair-school": "local-default",
         "explore": "local-default",
         "condense-pattern": "local-default",
         "gen-prompts": "local-default",
@@ -51,6 +52,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_tool_calls": "unlimited",
         "max_output_tokens": "unlimited",
         "max_total_tokens": "unlimited",
+    },
+    "step_usage_limits": {
+        # Eval 阶段限制更紧，避免模型在无效主页情况下长时间游走。
+        "eval": {
+            "max_requests": 16,
+            "max_tool_calls": 24,
+        },
     },
     "context_management": {
         "enabled": True,
@@ -197,7 +205,31 @@ class TutorSelectWorkflow:
                 verify_success = True
                 self._log("✓ 校验通过")
                 break
-            self._log("校验未通过，进入下一轮重试")
+            self._log("校验未通过，进入修复阶段")
+            repair_task = project_dir / f"_repair_task_r{retry}.txt"
+            self._write_text(
+                repair_task,
+                prompts.init_school_repair_prompt(
+                    school_name=school_name,
+                    academy_name=academy_name,
+                    homepage_url=homepage_url,
+                    tutors_file=self._rel(tutors_file),
+                    verify_feedback=verify_text,
+                ),
+            )
+            repair_result = self._run_agent(
+                "repair-school",
+                repair_task,
+                model_alias=model_alias,
+                per_step_model=per_step_model,
+            )
+            repair_text = str(repair_result.output or "")
+            repair_valid, repair_msg = self._validate_tutors_json(tutors_file)
+            if "REPAIR_SUCCESS" in repair_text and repair_valid:
+                verify_success = True
+                self._log(f"✓ 修复成功，跳过二次校验: {repair_msg}")
+                break
+            self._log(f"修复未通过，回到提取阶段: {repair_msg}")
             extract_success = False
 
         if not (extract_success and verify_success):
@@ -657,6 +689,11 @@ class TutorSelectWorkflow:
     ) -> Path:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         selected_model = self._select_model_alias(step, model_alias=model_alias, per_step_model=per_step_model)
+        usage_limits = dict(self.config.get("usage_limits", {}))
+        step_usage = self.config.get("step_usage_limits", {}).get(step, {})
+        if isinstance(step_usage, dict):
+            usage_limits.update(step_usage)
+
         data = {
             "agent": {
                 "name": f"tutor-select-{step}",
@@ -676,7 +713,7 @@ class TutorSelectWorkflow:
                 "tool_timeout": float(self.config["tool_limits"].get("timeout_seconds", 45)) + 10,
             },
             "model_alias": selected_model,
-            "usage_limits": self.config.get("usage_limits", {}),
+            "usage_limits": usage_limits,
             "context_management": self._context_management_config(),
             "tools": self._tool_configs(step),
         }
@@ -1134,8 +1171,7 @@ class TutorSelectWorkflow:
             url = str(tutor.get("主页URL", "") or "")
             if not name:
                 errors.append(f"第{i}项缺少导师姓名")
-            if not url:
-                errors.append(f"第{i}项 '{name}' 缺少主页URL")
+            # 允许主页URL为空：部分导师可能没有公开个人主页。
             if url and not url.startswith("http"):
                 errors.append(f"第{i}项 '{name}' 主页URL格式异常: {url[:80]}")
         if errors:
