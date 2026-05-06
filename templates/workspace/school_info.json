@@ -1,14 +1,15 @@
 {
-  "// note": "Initialization input for the first init-school run.",
-  "// instructions": "Fill school_name, academy_name, and homepage_url before running init-school.",
+  "// 说明": "目标院校信息配置文件",
+  "// instructions": "请填写你想筛选导师的学校和学院信息。学院主页或导师名录页网址不需要特别精确，agent 会自行确认和修正。",
   "// version": "1.0",
   "version": "1.0",
-  "school_name": "",
-  "academy_name": "",
-  "homepage_url": "",
+  "school_name": "东北大学",
+  "academy_name": "机械工程与自动化学院",
+  "homepage_url": "http://www.me.neu.edu.cn/3209/list.htm",
   "// fields": {
-    "school_name": "University name, for example Harbin Institute of Technology",
-    "academy_name": "School or academy name, for example School of Electronic and Information Engineering",
-    "homepage_url": "Faculty list or academy homepage URL"
-  }
+    "school_name": "院校名称，如：哈尔滨工业大学、华中科技大学",
+    "academy_name": "学院名称，如：电子与信息工程学院、人工智能与自动化学院",
+    "homepage_url": "学院主页或导师名录页网址，如 https://seie.hit.edu.cn/ 或 https://aia.hust.edu.cn/"
+  },
+  "// note": "Initialization input for the first init-school run."
 }

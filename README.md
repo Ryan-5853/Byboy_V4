@@ -54,7 +54,8 @@ WEBUI_PORT=8897
 
 ### 1. 模型层
 
-- [framework/llm_select/models.yaml](/framework/llm_select/models.yaml)
+- `templates/framework/llm_select/models.yaml`：模型配置模板（Git 跟踪）
+- `framework/llm_select/models.yaml`：本地模型配置实例（`python3 init_project.py` 自动生成/更新）
 
 用途：
 
@@ -70,7 +71,8 @@ api_key: ${DEEPSEEK_API_KEY}
 
 ### 2. 工作流层
 
-- [workflow/config/workflow.yaml](/workflow/config/workflow.yaml)
+- `templates/workflow/config/workflow.yaml`：工作流配置模板（Git 跟踪）
+- `workflow/config/workflow.yaml`：本地工作流配置实例（`python3 init_project.py` 自动生成/更新）
 
 用途：
 

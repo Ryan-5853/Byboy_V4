@@ -1,1 +1,156 @@
-{}
+{
+  "// 说明": "导师选择偏好配置文件",
+  "// scoring_dimensions": "评分维度数组。每个维度包含: name(名称), maxScore(满分), weight(权重影响), high/mid/low(评分指引)",
+  "// adds": "导师加分项。匹配到这些特征的导师会加分, favorLevel: essential(必备)/important(重要)/nice(加分)",
+  "// subs": "导师扣分项。匹配到这些特征的导师会减分或一票否决, penalty: fatal(一票否决)/strong(强烈减分)/mild(轻微减分)",
+  "// custom_notes": "其他自定义备注, 如只想看某个研究方向、必须年轻导师等",
+
+  "scoring_dimensions": [
+    {
+      "name": "方向匹配",
+      "maxScore": 20,
+      "description": "导师研究方向与学生兴趣的匹配程度",
+      "high": "15-20: 直接对口（机器人/无人机/无人系统/具身智能/自动驾驶）",
+      "mid": "8-14: 接近方向（CV/图像/控制/信号处理）",
+      "low": "1-7: 弱关联或无关"
+    },
+    {
+      "name": "工程系统匹配",
+      "maxScore": 20,
+      "description": "导师课题组是否以真实硬件/工程项目为导向",
+      "high": "15-20: 有真机硬件/实验平台/工程项目",
+      "mid": "8-14: 仿真为主",
+      "low": "1-7: 纯理论研究"
+    },
+    {
+      "name": "导师风格与课题组氛围",
+      "maxScore": 20,
+      "description": "导师对学生的投入度、课题组氛围是否适合",
+      "high": "15-20: 有课题组合影/活动/明确欢迎工程型学生",
+      "mid": "8-14: 中性或信息不足",
+      "low": "1-7: 感觉严肃/放养/负面评价"
+    },
+    {
+      "name": "录取可行性",
+      "maxScore": 15,
+      "description": "该导师录取该学生的现实可能性",
+      "high": "12-15: 欢迎工程型/竞赛型学生, 明确招生计划",
+      "mid": "6-11: 正常招生",
+      "low": "1-5: 只看绩点论文/已招满/仅收直博"
+    },
+    {
+      "name": "经历匹配",
+      "maxScore": 15,
+      "description": "学生项目经历与导师方向的关联度",
+      "high": "12-15: 多个项目直接对口",
+      "mid": "6-11: 部分对口",
+      "low": "1-5: 无对口"
+    },
+    {
+      "name": "主页信息完整度",
+      "maxScore": 5,
+      "description": "导师主页信息的详细程度",
+      "high": "5: 完整详细（研究方向、论文、项目、学生都列全）",
+      "mid": "3: 基本信息有（研究方向、论文列表）",
+      "low": "1: 只有简短简介"
+    },
+    {
+      "name": "套磁可写性",
+      "maxScore": 5,
+      "description": "能否找到具体技术切入点写套磁信",
+      "high": "5: 能写出具体技术切入点（对口方向+具体论文/项目）",
+      "mid": "3: 可以泛泛写",
+      "low": "1: 无切入点"
+    }
+  ],
+
+  "adds": [
+    {
+      "feature": "导师本人有无人系统/机器人方向的研究经历或项目",
+      "favorLevel": "essential",
+      "description": "这是核心方向要求"
+    },
+    {
+      "feature": "课题组有真机硬件平台或实验场地",
+      "favorLevel": "essential",
+      "description": "确保不是纯仿真组"
+    },
+    {
+      "feature": "导师在主页或招生信息中明确欢迎有竞赛/工程背景的学生",
+      "favorLevel": "important",
+      "description": "提高录取概率"
+    },
+    {
+      "feature": "课题组氛围好, 有学生活动、合影、团队照片",
+      "favorLevel": "important",
+      "description": "导师对学生投入度的信号"
+    },
+    {
+      "feature": "导师的研究方向能被学生的具体项目经历匹配",
+      "favorLevel": "important",
+      "description": "套磁时能写出具体技术切入点"
+    },
+    {
+      "feature": "导师近年有高频论文发表或工程项目",
+      "favorLevel": "nice",
+      "description": "科研活跃度指标"
+    },
+    {
+      "feature": "有年轻导师或新引进人才（副教授/讲师/准聘）",
+      "favorLevel": "nice",
+      "description": "可能更缺学生, 录取概率更高"
+    }
+  ],
+
+  "subs": [
+    {
+      "feature": "纯理论方向（数学推导/算法理论/信息论等）",
+      "penalty": "fatal",
+      "description": "一票否决, 与工程能力不匹配"
+    },
+    {
+      "feature": "导师已退休或接近退休",
+      "penalty": "strong",
+      "description": "可能无法带完研究生"
+    },
+    {
+      "feature": "导师风格偏放养, 无明显学生指导记录",
+      "penalty": "strong",
+      "description": "不适合工程型学生成长"
+    },
+    {
+      "feature": "只收博士或仅限推免",
+      "penalty": "strong",
+      "description": "录取可能性低"
+    },
+    {
+      "feature": "导师研究方向与学生背景完全不相关（如通信协议/射频/天线）",
+      "penalty": "mild",
+      "description": "匹配度低, 分数自然下调"
+    },
+    {
+      "feature": "导师主页信息极度缺乏（无研究方向、无论文、无项目）",
+      "penalty": "mild",
+      "description": "无法有效评估"
+    }
+  ],
+
+  "priority_thresholds": {
+    "S": 75,
+    "A": 65,
+    "B": 50,
+    "C": 35,
+    "D": 0
+  },
+
+  "custom_notes": [
+    "只想看：无人系统、机器人、自动驾驶、无人机等方向",
+    "不想去：纯通信/信号处理/射频/硬件电路设计方向",
+    "希望导师有实际工程项目和硬件平台",
+    "课题组最好走技术型路线而非纯学术论文型",
+    "接受硕士导师"
+  ],
+
+  "// version": "1.0",
+  "version": "1.0"
+}

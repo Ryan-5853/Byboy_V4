@@ -31,6 +31,8 @@ TEMPLATE_SPECS = [
     TemplateSpec(Path("workspace/active_project.json"), "json"),
     TemplateSpec(Path("workspace/school_info.json"), "json"),
     TemplateSpec(Path("workflow/User/tutor_favor.json"), "json"),
+    TemplateSpec(Path("workflow/config/workflow.yaml"), "yaml"),
+    TemplateSpec(Path("framework/llm_select/models.yaml"), "yaml"),
 ]
 
 
@@ -51,9 +53,7 @@ def load_structured(path: Path, file_format: str) -> Any:
     if file_format == "json":
         return json.loads(text)
     if file_format in {"yaml", "yml"}:
-        import yaml
-
-        return yaml.safe_load(text)
+        return load_yaml_with_fallback(text)
     raise ValueError(f"Unsupported format: {file_format}")
 
 
@@ -61,9 +61,7 @@ def dump_structured(value: Any, file_format: str) -> str:
     if file_format == "json":
         return json.dumps(value, ensure_ascii=False, indent=2) + "\n"
     if file_format in {"yaml", "yml"}:
-        import yaml
-
-        return yaml.safe_dump(value, allow_unicode=True, sort_keys=False)
+        return dump_yaml_with_fallback(value)
     raise ValueError(f"Unsupported format: {file_format}")
 
 
@@ -92,6 +90,112 @@ def read_text_with_fallback(path: Path) -> str:
     if last_error is not None:
         raise last_error
     return path.read_text(encoding="utf-8")
+
+
+def load_yaml_with_fallback(text: str) -> Any:
+    try:
+        import yaml
+
+        return yaml.safe_load(text)
+    except ModuleNotFoundError:
+        return parse_simple_yaml(text)
+
+
+def dump_yaml_with_fallback(value: Any) -> str:
+    try:
+        import yaml
+
+        return yaml.safe_dump(value, allow_unicode=True, sort_keys=False)
+    except ModuleNotFoundError:
+        return render_simple_yaml(value)
+
+
+def parse_simple_yaml(text: str) -> Any:
+    lines = text.splitlines()
+    root: dict[str, Any] = {}
+    stack: list[tuple[int, dict[str, Any]]] = [(-1, root)]
+
+    for raw_line in lines:
+        if not raw_line.strip():
+            continue
+        stripped = raw_line.lstrip(" ")
+        if stripped.startswith("#"):
+            continue
+        indent = len(raw_line) - len(stripped)
+        if ":" not in stripped:
+            raise ValueError(f"Unsupported YAML line: {raw_line}")
+        key, remainder = stripped.split(":", 1)
+        key = key.strip()
+        remainder = remainder.strip()
+
+        while len(stack) > 1 and indent <= stack[-1][0]:
+            stack.pop()
+        current = stack[-1][1]
+
+        if remainder == "":
+            new_map: dict[str, Any] = {}
+            current[key] = new_map
+            stack.append((indent, new_map))
+        else:
+            current[key] = parse_yaml_scalar(remainder)
+
+    return root
+
+
+def parse_yaml_scalar(value: str) -> Any:
+    lowered = value.lower()
+    if lowered in {"null", "~"}:
+        return None
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if value in {"[]", "{}"}:
+        return [] if value == "[]" else {}
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return value[1:-1]
+    try:
+        if "." in value:
+            return float(value)
+        return int(value)
+    except ValueError:
+        return value
+
+
+def render_simple_yaml(value: Any, indent: int = 0) -> str:
+    if not isinstance(value, dict):
+        raise ValueError("Simple YAML renderer only supports mapping roots.")
+    lines: list[str] = []
+    for key, item in value.items():
+        prefix = " " * indent + f"{key}:"
+        if isinstance(item, dict):
+            lines.append(prefix)
+            lines.append(render_simple_yaml(item, indent + 2).rstrip("\n"))
+        else:
+            lines.append(prefix + f" {render_yaml_scalar(item)}")
+    return "\n".join(lines) + "\n"
+
+
+def render_yaml_scalar(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        if not value:
+            return "[]"
+        raise ValueError("Simple YAML renderer does not support non-empty lists.")
+    if isinstance(value, dict):
+        if not value:
+            return "{}"
+        raise ValueError("Nested dict should be handled before scalar rendering.")
+    text = str(value)
+    if text == "" or any(ch in text for ch in ":#\n") or text.strip() != text:
+        escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return text
 
 
 def select_merge_key(template_items: list[Any], local_items: list[Any]) -> str | None:

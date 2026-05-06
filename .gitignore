@@ -25,6 +25,9 @@ workspace/*
 workflow/User/*
 !workflow/User/README.md
 
+workflow/config/*
+framework/llm_select/models.yaml
+
 # IDEs
 .vscode/
 .idea/
