@@ -1145,11 +1145,52 @@ tr:hover{background:#f8f9fb}
 </div>
 
 <script>
-async function api(url, opts) {
-  if (opts) {
-    return (await fetch(url, opts)).json();
-  } else {
-    return (await fetch(url)).json();
+const API_TIMEOUT_MS = 8000;
+const API_MAX_RETRIES = 3;
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function api(url, opts, retryCount = API_MAX_RETRIES) {
+  let lastError = null;
+  for (let attempt = 0; attempt < retryCount; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, {
+        ...(opts || {}),
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error('HTTP ' + response.status);
+      }
+      return await response.json();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= retryCount - 1) {
+        throw error;
+      }
+      await sleep(600 * (attempt + 1));
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+  throw lastError || new Error('API request failed');
+}
+
+function formatApiError(error) {
+  if (!error) return '未知错误';
+  if (error.name === 'AbortError') return '请求超时，后端暂时无响应';
+  return error.message || String(error);
+}
+
+async function safeRefresh(fn, label) {
+  try {
+    await fn();
+  } catch (error) {
+    console.warn(label + ' failed:', error);
   }
 }
 
@@ -1216,9 +1257,21 @@ function clearAndRenderLines(box, lines, marker) {
 
 // 刷新后恢复未完成的任务
 async function resumeIncompleteTask() {
-  const r = await api("/api/current-task");
+  let r;
+  try {
+    r = await api("/api/current-task");
+  } catch (error) {
+    console.warn('resume current task failed:', error);
+    return;
+  }
   if (!r.task_id) return;
-  const st = await api("/api/run-status?task_id=" + r.task_id);
+  let st;
+  try {
+    st = await api("/api/run-status?task_id=" + r.task_id);
+  } catch (error) {
+    console.warn('resume run-status failed:', error);
+    return;
+  }
   if (st && st.lines && !st.done) {
     // 有正在运行的任务，恢复显示
     currentTaskId = r.task_id;
@@ -1263,6 +1316,9 @@ async function resumeIncompleteTask() {
           refreshTokens();
           refreshResults();
         }
+      } catch (error) {
+        appendLineNode(box, '⚠ 轮询中断，正在重试: ' + formatApiError(error));
+        trimOutputBox(box, FRONTEND_MAX_RENDERED_LINES);
       } finally {
         taskPollingBusy = false;
       }
@@ -1744,6 +1800,9 @@ async function runCmd(cmd, label) {
         refreshTokens();
         refreshResults();
       }
+    } catch (error) {
+      appendLineNode(box, '⚠ 后端暂时断开，正在重试: ' + formatApiError(error));
+      trimOutputBox(box, FRONTEND_MAX_RENDERED_LINES);
     } finally {
       taskPollingBusy = false;
     }
@@ -1860,18 +1919,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       navigator.sendBeacon('/api/agent-prompt-injection', new Blob([body], {type: 'application/json'}));
     }
   });
-  await refreshProjectSelector();
-  await refreshStatus();
-  await refreshTokens();
-  await refreshResults();
-  await initFileEditor();
-  await initAgentPromptInjections();
-  await initStepModelSelects();
+  await safeRefresh(refreshProjectSelector, 'refreshProjectSelector');
+  await safeRefresh(refreshStatus, 'refreshStatus');
+  await safeRefresh(refreshTokens, 'refreshTokens');
+  await safeRefresh(refreshResults, 'refreshResults');
+  await safeRefresh(initFileEditor, 'initFileEditor');
+  await safeRefresh(initAgentPromptInjections, 'initAgentPromptInjections');
+  await safeRefresh(initStepModelSelects, 'initStepModelSelects');
   // Eval 进度轮询
-  await refreshEvalProgress();
-  setInterval(refreshEvalProgress, 3000);
-  setInterval(refreshTokens, 30000);
-  setInterval(refreshStatus, 60000);
+  await safeRefresh(refreshEvalProgress, 'refreshEvalProgress');
+  setInterval(() => { safeRefresh(refreshEvalProgress, 'refreshEvalProgress'); }, 3000);
+  setInterval(() => { safeRefresh(refreshTokens, 'refreshTokens'); }, 30000);
+  setInterval(() => { safeRefresh(refreshStatus, 'refreshStatus'); }, 60000);
 });
 </script>
 </body>

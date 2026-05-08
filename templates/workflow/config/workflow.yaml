@@ -3,6 +3,7 @@ step_model_aliases:
   build-profile: deepseekV4_flash
   init-school: deepseekV4_flash
   verify-school: local-focused
+  repair-school: null
   explore: deepseekV4_flash
   condense-pattern: deepseekV4_flash
   gen-prompts: local-focused

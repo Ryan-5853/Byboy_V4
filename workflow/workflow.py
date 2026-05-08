@@ -37,20 +37,22 @@ class WorkflowError(RuntimeError):
 
 AGENT_PROMPT_INJECTION_HEADER = "用户临时纠偏提示（仅当前学院 / 当前 agent 类型生效）"
 
+STEP_MODEL_KEYS: tuple[str, ...] = (
+    "build-profile",
+    "init-school",
+    "verify-school",
+    "repair-school",
+    "explore",
+    "condense-pattern",
+    "gen-prompts",
+    "eval",
+    "audit",
+)
+
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "default_model_alias": "local-default",
-    "step_model_aliases": {
-        "build-profile": "local-default",
-        "init-school": "local-default",
-        "verify-school": "local-default",
-        "repair-school": "local-default",
-        "explore": "local-default",
-        "condense-pattern": "local-default",
-        "gen-prompts": "local-default",
-        "eval": "local-default",
-        "audit": "local-default",
-    },
+    "step_model_aliases": {},
     "usage_limits": {
         "max_requests": "unlimited",
         "max_tool_calls": "unlimited",
@@ -65,9 +67,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
     },
     "agent_retry": {
-        "max_attempts": 3,
+        "max_attempts": "unlimited",
         "initial_delay_seconds": 2.0,
-        "max_delay_seconds": 12.0,
+        "max_delay_seconds": 1800.0,
     },
     "context_management": {
         "enabled": True,
@@ -679,12 +681,15 @@ class TutorSelectWorkflow:
         effective_prompt = self._prompt_file_with_injection(step, prompt_file)
         config_file = self._write_agent_config(step, effective_prompt, model_alias, per_step_model)
         self._log(f"[agent] step={step} prompt={self._rel(effective_prompt)} config={self._rel(config_file)}")
-        router = AgentRouter(llm_config_file=self.framework_root / "llm_select" / "models.yaml")
         retry_config = self._agent_retry_config(step)
         max_attempts = retry_config["max_attempts"]
-        for attempt in range(1, max_attempts + 1):
+        unlimited_retries = max_attempts is None
+        attempt = 1
+        while True:
             if attempt > 1:
-                self._log(f"[agent-retry] step={step} attempt={attempt}/{max_attempts}")
+                attempt_label = f"{attempt}/unlimited" if unlimited_retries else f"{attempt}/{max_attempts}"
+                self._log(f"[agent-retry] step={step} attempt={attempt_label}")
+            router = AgentRouter(llm_config_file=self.framework_root / "llm_select" / "models.yaml")
             result = router.run_sync(
                 RouterRequest(prompt_file=effective_prompt, config_file=config_file, raise_on_error=False)
             )
@@ -695,35 +700,74 @@ class TutorSelectWorkflow:
 
             error = result.error.message if result.error else "unknown error"
             category = result.error.category if result.error else "unknown"
-            if attempt >= max_attempts or not self._should_retry_agent_error(result.error):
+            if not self._should_retry_agent_error(result.error):
+                raise WorkflowError(f"subagent 执行失败 step={step} category={category}: {error}")
+            if (not unlimited_retries) and isinstance(max_attempts, int) and attempt >= max_attempts:
                 raise WorkflowError(f"subagent 执行失败 step={step} category={category}: {error}")
 
-            delay = self._agent_retry_delay(retry_config, attempt)
+            delay = self._agent_retry_delay(retry_config, attempt, result.error)
+            attempt_label = f"{attempt}/unlimited" if unlimited_retries else f"{attempt}/{max_attempts}"
             self._log(
                 f"[agent-retry] step={step} category={category} "
-                f"attempt={attempt}/{max_attempts} delay={delay:.1f}s error={error}"
+                f"attempt={attempt_label} delay={delay:.1f}s error={error}"
             )
             time.sleep(delay)
+            attempt += 1
 
         raise WorkflowError(f"subagent 执行失败 step={step}: retry loop exhausted")
 
-    def _agent_retry_config(self, step: str) -> dict[str, float | int]:
+    def _agent_retry_config(self, step: str) -> dict[str, float | int | None]:
         base = dict(self.config.get("agent_retry", {}))
         step_overrides = self.config.get("step_agent_retry", {}).get(step, {})
         if isinstance(step_overrides, dict):
             base.update(step_overrides)
-        max_attempts = _coerce_int(base.get("max_attempts"), default=3, minimum=1, maximum=5)
+        max_attempts_raw = base.get("max_attempts", 3)
+        max_attempts: int | None
+        if isinstance(max_attempts_raw, str) and max_attempts_raw.strip().lower() in {"unlimited", "infinite", "inf"}:
+            max_attempts = None
+        else:
+            try:
+                parsed_attempts = int(max_attempts_raw)
+            except (TypeError, ValueError):
+                parsed_attempts = 3
+            max_attempts = None if parsed_attempts <= 0 else max(1, min(1000000, parsed_attempts))
         return {
             "max_attempts": max_attempts,
             "initial_delay_seconds": _coerce_float(base.get("initial_delay_seconds"), default=2.0, minimum=0.0, maximum=60.0),
-            "max_delay_seconds": _coerce_float(base.get("max_delay_seconds"), default=12.0, minimum=0.0, maximum=120.0),
+            "max_delay_seconds": _coerce_float(base.get("max_delay_seconds"), default=1800.0, minimum=1.0, maximum=1800.0),
+            "cloud_route_max_delay_seconds": _coerce_float(
+                base.get("cloud_route_max_delay_seconds"),
+                default=60.0,
+                minimum=5.0,
+                maximum=1800.0,
+            ),
         }
 
-    def _agent_retry_delay(self, config: dict[str, float | int], attempt: int) -> float:
+    def _agent_retry_delay(self, config: dict[str, float | int], attempt: int, error: Any = None) -> float:
         initial = float(config["initial_delay_seconds"])
         maximum = float(config["max_delay_seconds"])
+        if self._looks_like_cloud_route_unavailable(error):
+            maximum = min(maximum, float(config.get("cloud_route_max_delay_seconds", 60.0)))
         delay = min(maximum, initial * (2 ** max(0, attempt - 1)))
         return delay + random.uniform(0, min(1.0, delay * 0.25))
+
+    def _looks_like_cloud_route_unavailable(self, error: Any) -> bool:
+        if error is None:
+            return False
+        text = " ".join(
+            [
+                str(getattr(error, "message", "") or ""),
+                json.dumps(getattr(error, "details", {}) or {}, ensure_ascii=False),
+            ]
+        ).lower()
+        markers = [
+            "model_not_found",
+            "无可用渠道",
+            "no available channel",
+            "no available distributor",
+            "distributor",
+        ]
+        return any(marker in text for marker in markers)
 
     def _should_retry_agent_error(self, error: Any) -> bool:
         if error is None:
@@ -1347,11 +1391,19 @@ class TutorSelectWorkflow:
     def _load_workflow_config(self) -> dict[str, Any]:
         config_file = self.config_dir / "workflow.yaml"
         if not config_file.is_file():
-            return DEFAULT_CONFIG.copy()
-        data = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
-        if not isinstance(data, dict):
-            raise WorkflowError(f"配置文件必须是 mapping: {config_file}")
-        return _deep_merge(DEFAULT_CONFIG, data)
+            config = DEFAULT_CONFIG.copy()
+        else:
+            data = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
+            if not isinstance(data, dict):
+                raise WorkflowError(f"配置文件必须是 mapping: {config_file}")
+            config = _deep_merge(DEFAULT_CONFIG, data)
+        step_aliases = config.setdefault("step_model_aliases", {})
+        if not isinstance(step_aliases, dict):
+            step_aliases = {}
+            config["step_model_aliases"] = step_aliases
+        for step in STEP_MODEL_KEYS:
+            step_aliases.setdefault(step, None)
+        return config
 
     def _school_info(self) -> dict[str, Any]:
         school_info_file = self.workspace_dir / "school_info.json"
